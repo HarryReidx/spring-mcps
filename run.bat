@@ -1,0 +1,3 @@
+@echo off
+echo Starting Dify Ingest Service...
+java -jar target\dify-ingest-0.0.1-SNAPSHOT.jar

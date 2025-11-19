@@ -1,0 +1,30 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: dify-ingest-service
+  datasource:
+    url: jdbc:postgresql://172.24.0.5:5432/dify
+    username: postgres
+    password: difyai123456
+    driver-class-name: org.postgresql.Driver
+  jackson:
+    default-property-inclusion: non_null
+
+app:
+  dify:
+    base-url: http://172.24.0.5
+    api-key: ${DIFY_API_KEY:dataset-CxGlfh0xHkUoCts6dj17XUhw}
+  mineru:
+    base-url: ${MINERU_BASE_URL:http://172.24.0.5:8000}
+  img:
+    path-prefix: http://172.24.0.5:9000/ty-ai-flow/
+  segmentation:
+    separator: "\n"
+    max-tokens: 1024
+    chunk-overlap: 50
+
+logging:
+  level:
+    com.example.difyingest: DEBUG
