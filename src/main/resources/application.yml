@@ -1,30 +1,54 @@
-server:
-  port: 8080
-
+# Spring Boot 应用配置
 spring:
   application:
-    name: dify-ingest-service
+    name: dify-ingest
+  
+  # 数据库配置（可选，用于图片路径替换）
   datasource:
     url: jdbc:postgresql://172.24.0.5:5432/dify
     username: postgres
     password: difyai123456
     driver-class-name: org.postgresql.Driver
-  jackson:
-    default-property-inclusion: non_null
+  
+  # JPA 配置
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: none
 
+# 服务端口
+server:
+  port: 8080
+
+# 应用配置
 app:
+  # Dify API 配置
   dify:
-    base-url: http://172.24.0.5
-    api-key: ${DIFY_API_KEY:dataset-CxGlfh0xHkUoCts6dj17XUhw}
+    api-key: ${DIFY_API_KEY:dataset-CxGlfh0xHkUoCts6dj17XUhw}  # Dify API 密钥
+    base-url: ${DIFY_BASE_URL:http://172.24.0.5/v1}            # Dify API 地址
+  
+  # MinerU 服务配置
   mineru:
-    base-url: ${MINERU_BASE_URL:http://172.24.0.5:8000}
-  img:
-    path-prefix: http://172.24.0.5:9000/ty-ai-flow/
-  segmentation:
-    separator: "\n"
-    max-tokens: 1024
-    chunk-overlap: 50
+    base-url: ${MINERU_BASE_URL:http://172.24.0.5:8000}        # MinerU 服务地址
+    server-type: ${MINERU_SERVER_TYPE:local}                   # 服务类型: local 或 remote
+    token: ${MINERU_TOKEN:}                                    # 远程服务 token（可选）
+    parse-method: auto                                         # 解析方法: auto, ocr, txt
+    backend: pipeline                                          # 解析后端: pipeline, vlm-transformers 等
+    enable-formula: true                                       # 是否启用公式识别
+    enable-table: true                                         # 是否启用表格识别
+    language: ch                                               # 文档语言: ch, en 等
+  
+  # MinIO 配置
+  minio:
+    img-path-prefix: ${MINIO_IMG_PREFIX:http://172.24.0.5:9000/ty-ai-flow}  # 图片路径前缀
+  
+  # 文档分段配置
+  chunking:
+    separator: "\n"      # 分段分隔符
+    max-tokens: 1000     # 最大 token 数
+    chunk-overlap: 50    # 分段重叠
 
+# 日志配置
 logging:
   level:
-    com.example.difyingest: DEBUG
+    com.example.ingest: DEBUG  # 应用日志级别

@@ -1,4 +1,4 @@
-package com.example.difyingest.model;
+package com.example.ingest.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
@@ -27,8 +27,16 @@ public class DifyCreateDocumentRequest {
     @Builder
     public static class Rules {
         @JsonProperty("pre_processing_rules")
-        private Object[] preProcessingRules;
+        private PreProcessingRule[] preProcessingRules;
+        
         private Segmentation segmentation;
+    }
+
+    @Data
+    @Builder
+    public static class PreProcessingRule {
+        private String id;
+        private Boolean enabled;
     }
 
     @Data

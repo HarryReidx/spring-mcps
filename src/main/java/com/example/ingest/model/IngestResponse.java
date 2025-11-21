@@ -1,4 +1,4 @@
-package com.example.difyingest.model;
+package com.example.ingest.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -7,22 +7,36 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+/**
+ * 文档入库响应
+ * 返回给 Dify HTTP 插件
+ */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DocumentIngestResponse {
+public class IngestResponse {
+    /** 是否成功 */
     private Boolean success;
-    private String message;
+    
+    /** 文档 ID 列表 */
     private List<String> fileIds;
+    
+    /** 统计信息 */
     private Stats stats;
 
+    /**
+     * 统计信息
+     */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Stats {
-        private Integer chunkCount;
+        /** 图片数量 */
         private Integer imageCount;
+        
+        /** 分段数量 */
+        private Integer chunkCount;
     }
 }
