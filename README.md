@@ -164,6 +164,7 @@ result = result.replaceAll(pattern, "$1" + realUrl + "$2");
 - 全局异常处理
 - 详细日志记录
 - 友好错误响应
+- **自动清理 JSON 中的特殊字符**（解决 Dify HTTP 插件发送的非断空格问题）
 
 ### 灵活配置
 - 支持环境变量覆盖

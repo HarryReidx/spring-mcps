@@ -103,7 +103,12 @@ public class DocumentIngestService {
                     
         } catch (Exception e) {
             log.error("文档入库失败", e);
-            throw new RuntimeException("文档入库失败: " + e.getMessage(), e);
+            return IngestResponse.builder()
+                    .success(false)
+                    .errorMsg(e.getMessage())
+                    .fileIds(Collections.emptyList())
+                    .build();
+//            throw new RuntimeException("文档入库失败: " + e.getMessage(), e);
         }
     }
 

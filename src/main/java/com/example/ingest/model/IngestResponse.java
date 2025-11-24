@@ -26,6 +26,11 @@ public class IngestResponse {
     private Stats stats;
 
     /**
+     * 错误信息
+     */
+    private String errorMsg;
+
+    /**
      * 统计信息
      */
     @Data
