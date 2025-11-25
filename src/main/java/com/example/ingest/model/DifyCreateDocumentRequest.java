@@ -15,6 +15,9 @@ public class DifyCreateDocumentRequest {
     
     @JsonProperty("process_rule")
     private ProcessRule processRule;
+    
+    @JsonProperty("doc_form")
+    private String docForm;
 
     @Data
     @Builder

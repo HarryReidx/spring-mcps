@@ -2,6 +2,7 @@ package com.example.ingest.service;
 
 import com.example.ingest.client.DifyClient;
 import com.example.ingest.client.MineruClient;
+import com.example.ingest.client.VlmClient;
 import com.example.ingest.config.AppProperties;
 import com.example.ingest.entity.ToolFile;
 import com.example.ingest.model.*;
@@ -31,6 +32,8 @@ public class DocumentIngestService {
     
     private final MineruClient mineruClient;
     private final DifyClient difyClient;
+    private final VlmClient vlmClient;
+    private final SemanticTextProcessor semanticTextProcessor;
     private final ToolFileRepository toolFileRepository;
     private final AppProperties appProperties;
     private final boolean dbEnabled;
@@ -43,10 +46,14 @@ public class DocumentIngestService {
     public DocumentIngestService(
             MineruClient mineruClient,
             DifyClient difyClient,
+            VlmClient vlmClient,
+            SemanticTextProcessor semanticTextProcessor,
             @org.springframework.beans.factory.annotation.Autowired(required = false) ToolFileRepository toolFileRepository,
             AppProperties appProperties) {
         this.mineruClient = mineruClient;
         this.difyClient = difyClient;
+        this.vlmClient = vlmClient;
+        this.semanticTextProcessor = semanticTextProcessor;
         this.toolFileRepository = toolFileRepository;
         this.appProperties = appProperties;
         this.dbEnabled = toolFileRepository != null;
@@ -57,10 +64,11 @@ public class DocumentIngestService {
     }
 
     /**
-     * 主流程：下载 → 转换 → 解析 → 图片处理 → 入库
+     * 主流程：下载 → 转换 → 解析 → 图片处理 → 语义增强 → 入库
      */
     public IngestResponse ingestDocument(IngestRequest request) {
-        log.info("开始处理文档入库: datasetId={}, fileName={}", request.getDatasetId(), request.getFileName());
+        log.info("开始处理文档入库: datasetId={}, fileName={}, enableVlm={}", 
+                request.getDatasetId(), request.getFileName(), request.getEnableVlm());
         
         try {
             // 1. 下载文件
@@ -82,16 +90,19 @@ public class DocumentIngestService {
                     images != null ? images.size() : 0);
             
             // 5. 处理图片：替换 markdown 中的临时路径为真实 MinIO URL
-            String finalMarkdown = replaceImagePaths(mdContent, images);
+            String markdownWithRealUrls = replaceImagePaths(mdContent, images);
             
-            // 6. 调用 Dify API 写入知识库
-            DifyCreateDocumentRequest difyRequest = buildDifyRequest(request.getFileName(), finalMarkdown);
+            // 6. 语义增强处理
+            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm());
+            
+            // 7. 调用 Dify API 写入知识库
+            DifyCreateDocumentRequest difyRequest = buildDifyRequest(request, finalMarkdown);
             DifyCreateDocumentResponse difyResponse = difyClient.createDocument(request.getDatasetId(), difyRequest);
             
-            // 7. 清理临时文件
+            // 8. 清理临时文件
             cleanupTempFiles(downloadedFile, pdfFile);
             
-            // 8. 返回结果
+            // 9. 返回结果
             return IngestResponse.builder()
                     .success(true)
                     .fileIds(Collections.singletonList(difyResponse.getDocument().getId()))
@@ -108,7 +119,6 @@ public class DocumentIngestService {
                     .errorMsg(e.getMessage())
                     .fileIds(Collections.emptyList())
                     .build();
-//            throw new RuntimeException("文档入库失败: " + e.getMessage(), e);
         }
     }
 
@@ -222,33 +232,138 @@ public class DocumentIngestService {
     }
 
     /**
-     * 构建 Dify 创建文档请求
+     * 语义增强处理
+     * 
+     * @param markdown 已替换图片路径的 Markdown
+     * @param images 图片映射
+     * @param enableVlm 是否启用 VLM
+     * @return 增强后的 Markdown
      */
-    private DifyCreateDocumentRequest buildDifyRequest(String fileName, String markdown) {
+    private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm) {
+        Map<String, VlmClient.ImageAnalysisResult> analysisResults = null;
+        
+        // 如果启用 VLM，并发分析所有图片
+        if (Boolean.TRUE.equals(enableVlm) && images != null && !images.isEmpty()) {
+            log.info("启用 VLM 图片分析，共 {} 张图片", images.size());
+            analysisResults = analyzeImagesWithVlm(images);
+        }
+        
+        // 执行语义增强
+        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults);
+    }
+
+    /**
+     * 并发调用 VLM 分析所有图片
+     */
+    private Map<String, VlmClient.ImageAnalysisResult> analyzeImagesWithVlm(Map<String, String> images) {
+        List<java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult>> futures = new ArrayList<>();
+        
+        // 从数据库获取真实 URL
+        Map<String, String> imageUrls = getImageRealUrls(images);
+        
+        // 并发分析（使用 URL 作为标识）
+        for (Map.Entry<String, String> entry : imageUrls.entrySet()) {
+            String imageName = entry.getKey();
+            String imageUrl = entry.getValue();
+            // 使用 imageUrl 作为 imageName，这样可以直接匹配 Markdown 中的 URL
+            futures.add(vlmClient.analyzeImageAsync(imageUrl, imageUrl));
+        }
+        
+        // 等待所有任务完成
+        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+        
+        // 收集结果（key 是完整的 URL）
+        Map<String, VlmClient.ImageAnalysisResult> results = new HashMap<>();
+        for (java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult> future : futures) {
+            try {
+                VlmClient.ImageAnalysisResult result = future.get();
+                // 使用 imageName（即 URL）作为 key
+                results.put(result.getImageName(), result);
+            } catch (Exception e) {
+                log.error("获取 VLM 分析结果失败", e);
+            }
+        }
+        
+        log.info("VLM 分析完成，成功 {} 张", results.size());
+        return results;
+    }
+
+    /**
+     * 获取图片的真实 URL（从数据库查询）
+     */
+    private Map<String, String> getImageRealUrls(Map<String, String> images) {
+        Map<String, String> urls = new HashMap<>();
+        
+        if (!dbEnabled) {
+            return urls;
+        }
+        
+        try {
+            List<String> imageNames = new ArrayList<>(images.keySet());
+            List<ToolFile> toolFiles = toolFileRepository.findByNameIn(imageNames);
+            
+            for (ToolFile toolFile : toolFiles) {
+                String realUrl = appProperties.getMinio().getImgPathPrefix() + "/" + toolFile.getFileKey();
+                urls.put(toolFile.getName(), realUrl);
+            }
+        } catch (Exception e) {
+            log.error("查询图片真实 URL 失败", e);
+        }
+        
+        return urls;
+    }
+
+    /**
+     * 构建 Dify 创建文档请求（支持动态配置）
+     */
+    private DifyCreateDocumentRequest buildDifyRequest(IngestRequest request, String markdown) {
+        // 判断分块模式
+        boolean isAutoMode = "AUTO".equalsIgnoreCase(request.getChunkingMode());
+        
+        DifyCreateDocumentRequest.ProcessRule processRule;
+        
+        if (isAutoMode) {
+            // 自动模式
+            processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                    .mode("automatic")
+                    .build();
+        } else {
+            // 自定义模式
+            Integer maxTokens = request.getMaxTokens() != null ? 
+                    request.getMaxTokens() : appProperties.getChunking().getMaxTokens();
+            Integer chunkOverlap = request.getChunkOverlap() != null ? 
+                    request.getChunkOverlap() : appProperties.getChunking().getChunkOverlap();
+            String separator = request.getSeparator() != null ? 
+                    request.getSeparator() : appProperties.getChunking().getSeparator();
+            
+            processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                    .mode("custom")
+                    .rules(DifyCreateDocumentRequest.Rules.builder()
+                            .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
+                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                            .id("remove_extra_spaces")
+                                            .enabled(true)
+                                            .build(),
+                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                            .id("remove_urls_emails")
+                                            .enabled(false)
+                                            .build()
+                            })
+                            .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                    .separator(separator)
+                                    .maxTokens(maxTokens)
+                                    .chunkOverlap(chunkOverlap)
+                                    .build())
+                            .build())
+                    .build();
+        }
+        
         return DifyCreateDocumentRequest.builder()
-                .name(fileName)
+                .name(request.getFileName())
                 .text(markdown)
-                .indexingTechnique("high_quality")
-                .processRule(DifyCreateDocumentRequest.ProcessRule.builder()
-                        .mode("custom")
-                        .rules(DifyCreateDocumentRequest.Rules.builder()
-                                .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
-                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
-                                                .id("remove_extra_spaces")
-                                                .enabled(true)
-                                                .build(),
-                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
-                                                .id("remove_urls_emails")
-                                                .enabled(false)
-                                                .build()
-                                })
-                                .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                        .separator(appProperties.getChunking().getSeparator())
-                                        .maxTokens(appProperties.getChunking().getMaxTokens())
-                                        .chunkOverlap(appProperties.getChunking().getChunkOverlap())
-                                        .build())
-                                .build())
-                        .build())
+                .indexingTechnique(request.getIndexingTechnique())
+                .docForm(request.getDocForm())
+                .processRule(processRule)
                 .build();
     }
 

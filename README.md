@@ -7,6 +7,10 @@ Spring Boot 服务，用于绕过 Dify 平台参数大小限制，实现完整�
 - **文件下载**：支持 HTTP/HTTPS，自动管理临时文件
 - **MinerU 解析**：调用 MinerU 进行图文混合解析，提取 Markdown 和图片信息
 - **图片路径替换**：从 PostgreSQL 查询真实 MinIO URL，自动替换 Markdown 中的图片路径
+- **🆕 语义增强 RAG**：基于 Dify `create-by-text` 接口的语义增强处理
+  - **VLM 视觉理解**：并发调用 GPT-4o/Claude-3.5 分析图片，提取语义描述和 OCR 文字
+  - **语义重写**：注入标题上下文，确保 Dify 切分后的片段包含足够信息
+  - **动态分块配置**：支持 AUTO 和 CUSTOM 两种分块模式
 - **Dify 入库**：调用 Dify API 将处理后的文档写入知识库
 
 ## 技术栈
@@ -25,10 +29,12 @@ com.example.ingest
 ├── controller/
 │   └── DocumentIngestController.java   # HTTP 接口
 ├── service/
-│   └── DocumentIngestService.java      # 核心业务逻辑
+│   ├── DocumentIngestService.java      # 核心业务逻辑
+│   └── SemanticTextProcessor.java      # 🆕 语义文本处理器
 ├── client/
 │   ├── MineruClient.java               # MinerU 客户端
-│   └── DifyClient.java                 # Dify 客户端
+│   ├── DifyClient.java                 # Dify 客户端
+│   └── VlmClient.java                  # 🆕 VLM 视觉理解客户端
 ├── repository/
 │   └── ToolFileRepository.java         # 数据库查询
 ├── entity/
@@ -62,12 +68,26 @@ app:
     separator: "\n"
     max-tokens: 1000
     chunk-overlap: 50
+  vlm:  # 🆕 VLM 视觉模型配置
+    base-url: https://api.openai.com/v1/chat/completions
+    api-key: ${VLM_API_KEY}
+    model: gpt-4o
 ```
 
 可通过环境变量覆盖：
 ```bash
 export DIFY_API_KEY=your-key
 export MINERU_BASE_URL=http://your-host:8000
+
+# VLM 配置（可选，仅在启用 VLM 时需要）
+# 使用 Ollama（本地部署，推荐）
+export VLM_BASE_URL=http://172.24.0.5:11434/api/chat
+export VLM_MODEL=qwen2-vl:7b
+
+# 或使用 OpenAI
+# export VLM_BASE_URL=https://api.openai.com/v1/chat/completions
+# export VLM_API_KEY=sk-xxx
+# export VLM_MODEL=gpt-4o
 ```
 
 ## 快速开始
@@ -106,7 +126,13 @@ curl http://localhost:8080/api/dify/document/health
   "datasetId": "xxx",
   "fileUrl": "http://xxx/file.pdf",
   "fileName": "file.pdf",
-  "fileType": "pdf"
+  "fileType": "pdf",
+  "enableVlm": false,           // 🆕 是否启用 VLM 图片理解
+  "chunkingMode": "AUTO",       // 🆕 分块模式: AUTO | CUSTOM
+  "maxTokens": 1000,            // 🆕 最大 token 数（CUSTOM 模式）
+  "chunkOverlap": 50,           // 🆕 分块重叠（CUSTOM 模式）
+  "indexingTechnique": "high_quality",  // 🆕 索引技术
+  "docForm": "text_model"       // 🆕 文档形式
 }
 ```
 
@@ -218,9 +244,36 @@ curl -X POST http://localhost:8080/api/dify/document/ingest \
 tail -f logs/spring.log
 ```
 
+## 🆕 语义增强 RAG
+
+详细文档：
+- [快速开始](QUICKSTART.md)
+- [使用指南](SEMANTIC-RAG-USAGE.md)
+- [架构设计](ARCHITECTURE.md)
+- [Ollama 配置](OLLAMA-SETUP.md) ⭐ 本地部署 VLM
+- [实现总结](IMPLEMENTATION-SUMMARY.md)
+
+### 快速示例
+
+启用 VLM + 自定义分块：
+```bash
+curl -X POST http://localhost:8080/api/dify/document/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "datasetId": "your-dataset-id",
+    "fileUrl": "http://example.com/document.pdf",
+    "fileName": "document.pdf",
+    "fileType": "pdf",
+    "enableVlm": true,
+    "chunkingMode": "CUSTOM",
+    "maxTokens": 800,
+    "chunkOverlap": 100
+  }'
+```
+
 ## 待实现功能
 
 - [ ] Office 文档转 PDF（doc/docx/ppt/pptx）
 - [ ] 大文件分片上传
 - [ ] 异步处理队列
-- [ ] 重试机制
+- [ ] VLM 调用重试和缓存机制

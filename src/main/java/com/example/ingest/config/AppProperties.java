@@ -23,6 +23,9 @@ public class AppProperties {
     
     /** 文档分段配置 */
     private ChunkingConfig chunking = new ChunkingConfig();
+    
+    /** VLM 视觉模型配置 */
+    private VlmConfig vlm = new VlmConfig();
 
     /**
      * Dify API 配置
@@ -88,5 +91,29 @@ public class AppProperties {
         
         /** 分段重叠 */
         private Integer chunkOverlap = 50;
+    }
+
+    /**
+     * VLM 视觉模型配置
+     */
+    @Data
+    public static class VlmConfig {
+        /** 提供商类型: openai, ollama（可选，自动检测） */
+        private String provider;
+        
+        /** API 基础地址 */
+        private String baseUrl = "https://api.openai.com/v1/chat/completions";
+        
+        /** API 密钥（Ollama 不需要） */
+        private String apiKey;
+        
+        /** 模型名称 */
+        private String model = "gpt-4o";
+        
+        /** 最大 token 数 */
+        private Integer maxTokens = 1000;
+        
+        /** 提示词 */
+        private String prompt = "请详细描述这张图片的内容，并提取其中的所有文字。格式：描述: [图片描述]\nOCR: [提取的文字]";
     }
 }
