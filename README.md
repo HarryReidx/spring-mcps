@@ -247,11 +247,11 @@ tail -f logs/spring.log
 ## 🆕 语义增强 RAG
 
 详细文档：
-- [快速开始](QUICKSTART.md)
-- [使用指南](SEMANTIC-RAG-USAGE.md)
+- [快速开始](bak/QUICKSTART.md)
+- [使用指南](bak/SEMANTIC-RAG-USAGE.md)
 - [架构设计](ARCHITECTURE.md)
-- [Ollama 配置](OLLAMA-SETUP.md) ⭐ 本地部署 VLM
-- [实现总结](IMPLEMENTATION-SUMMARY.md)
+- [Ollama 配置](bak/OLLAMA-SETUP.md) ⭐ 本地部署 VLM
+- [实现总结](bak/IMPLEMENTATION-SUMMARY.md)
 
 ### 快速示例
 

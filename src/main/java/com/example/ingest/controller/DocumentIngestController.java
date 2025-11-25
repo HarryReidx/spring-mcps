@@ -1,12 +1,15 @@
 package com.example.ingest.controller;
 
+import com.example.ingest.entity.IngestTask;
 import com.example.ingest.model.IngestRequest;
 import com.example.ingest.model.IngestResponse;
-import com.example.ingest.service.DocumentIngestService;
+import com.example.ingest.service.IngestTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * 文档入库控制器
@@ -18,10 +21,10 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class DocumentIngestController {
     
-    private final DocumentIngestService documentIngestService;
+    private final IngestTaskService ingestTaskService;
 
     /**
-     * 文档入库接口
+     * 文档入库接口（同步）
      * POST /api/dify/document/ingest
      * 
      * 请求体示例：
@@ -34,9 +37,10 @@ public class DocumentIngestController {
      */
     @PostMapping("/ingest")
     public ResponseEntity<IngestResponse> ingestDocument(@RequestBody IngestRequest request) {
-        log.info("收到文档入库请求: datasetId={}, fileName={}", request.getDatasetId(), request.getFileName());
+        log.info("收到同步文档入库请求: datasetId={}, fileName={}", request.getDatasetId(), request.getFileName());
         
-        IngestResponse response = documentIngestService.ingestDocument(request);
+        // 同步执行并入库
+        IngestResponse response = ingestTaskService.executeTaskSync(request);
         
         return ResponseEntity.ok(response);
     }

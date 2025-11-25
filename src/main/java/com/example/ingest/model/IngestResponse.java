@@ -44,4 +44,8 @@ public class IngestResponse {
         /** 分段数量 */
         private Integer chunkCount;
     }
+    // 是否成功
+    public Boolean isSuccess() {
+        return success;
+    }
 }

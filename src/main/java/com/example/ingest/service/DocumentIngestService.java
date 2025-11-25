@@ -4,6 +4,7 @@ import com.example.ingest.client.DifyClient;
 import com.example.ingest.client.MineruClient;
 import com.example.ingest.client.VlmClient;
 import com.example.ingest.config.AppProperties;
+import com.example.ingest.entity.IngestTask;
 import com.example.ingest.entity.ToolFile;
 import com.example.ingest.model.*;
 import com.example.ingest.repository.ToolFileRepository;
@@ -65,10 +66,14 @@ public class DocumentIngestService {
 
     /**
      * 主流程：下载 → 转换 → 解析 → 图片处理 → 语义增强 → 入库
+     * 
+     * @param request 入库请求
+     * @param executionMode 执行模式（SYNC 或 ASYNC）
+     * @return 入库响应
      */
-    public IngestResponse ingestDocument(IngestRequest request) {
-        log.info("开始处理文档入库: datasetId={}, fileName={}, enableVlm={}", 
-                request.getDatasetId(), request.getFileName(), request.getEnableVlm());
+    public IngestResponse ingestDocument(IngestRequest request, IngestTask.ExecutionMode executionMode) {
+        log.info("开始处理文档入库: datasetId={}, fileName={}, enableVlm={}, mode={}", 
+                request.getDatasetId(), request.getFileName(), request.getEnableVlm(), executionMode);
         
         try {
             // 1. 下载文件
@@ -93,7 +98,7 @@ public class DocumentIngestService {
             String markdownWithRealUrls = replaceImagePaths(mdContent, images);
             
             // 6. 语义增强处理
-            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm());
+            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm(), request);
             
             // 7. 调用 Dify API 写入知识库
             DifyCreateDocumentRequest difyRequest = buildDifyRequest(request, finalMarkdown);
@@ -237,9 +242,10 @@ public class DocumentIngestService {
      * @param markdown 已替换图片路径的 Markdown
      * @param images 图片映射
      * @param enableVlm 是否启用 VLM
+     * @param request 原始请求（用于判断是否使用默认分段）
      * @return 增强后的 Markdown
      */
-    private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm) {
+    private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm, IngestRequest request) {
         Map<String, VlmClient.ImageAnalysisResult> analysisResults = null;
         
         // 如果启用 VLM，并发分析所有图片
@@ -248,8 +254,11 @@ public class DocumentIngestService {
             analysisResults = analyzeImagesWithVlm(images);
         }
         
+        // 判断是否使用默认分段（没有自定义 separator）
+        boolean useDefaultSegmentation = request.getSeparator() == null || request.getSeparator().isEmpty();
+        
         // 执行语义增强
-        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults);
+        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, useDefaultSegmentation);
     }
 
     /**
@@ -319,6 +328,7 @@ public class DocumentIngestService {
     private DifyCreateDocumentRequest buildDifyRequest(IngestRequest request, String markdown) {
         // 判断分块模式
         boolean isAutoMode = "AUTO".equalsIgnoreCase(request.getChunkingMode());
+        boolean isHierarchical = "hierarchical_model".equalsIgnoreCase(request.getDocForm());
         
         DifyCreateDocumentRequest.ProcessRule processRule;
         
@@ -327,8 +337,43 @@ public class DocumentIngestService {
             processRule = DifyCreateDocumentRequest.ProcessRule.builder()
                     .mode("automatic")
                     .build();
+        } else if (isHierarchical) {
+            // 父子结构模式（从配置文件读取默认值）
+            Integer maxTokens = request.getMaxTokens() != null ? 
+                    request.getMaxTokens() : appProperties.getHierarchical().getMaxTokens();
+            Integer subMaxTokens = request.getSubMaxTokens() != null ? 
+                    request.getSubMaxTokens() : appProperties.getHierarchical().getSubMaxTokens();
+            Integer chunkOverlap = request.getChunkOverlap() != null ? 
+                    request.getChunkOverlap() : appProperties.getHierarchical().getChunkOverlap();
+            
+            processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                    .mode("hierarchical")
+                    .rules(DifyCreateDocumentRequest.Rules.builder()
+                            .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
+                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                            .id("remove_extra_spaces")
+                                            .enabled(true)
+                                            .build(),
+                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                            .id("remove_urls_emails")
+                                            .enabled(false)
+                                            .build()
+                            })
+                            .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                    .separator("{{>1#}}")  // 父分段符
+                                    .maxTokens(maxTokens)
+                                    .chunkOverlap(chunkOverlap)  // 父分段重叠
+                                    .build())
+                            .parentMode("paragraph")  // 父分段模式
+                            .subchunkSegmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                    .separator("{{>2#}}")  // 子分段符
+                                    .maxTokens(subMaxTokens)
+                                    .chunkOverlap(chunkOverlap)  // 子分段重叠
+                                    .build())
+                            .build())
+                    .build();
         } else {
-            // 自定义模式
+            // 自定义模式（文本模型）
             Integer maxTokens = request.getMaxTokens() != null ? 
                     request.getMaxTokens() : appProperties.getChunking().getMaxTokens();
             Integer chunkOverlap = request.getChunkOverlap() != null ? 

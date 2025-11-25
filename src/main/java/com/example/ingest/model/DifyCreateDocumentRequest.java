@@ -22,7 +22,7 @@ public class DifyCreateDocumentRequest {
     @Data
     @Builder
     public static class ProcessRule {
-        private String mode;
+        private String mode;  // automatic, custom, hierarchical
         private Rules rules;
     }
 
@@ -33,6 +33,12 @@ public class DifyCreateDocumentRequest {
         private PreProcessingRule[] preProcessingRules;
         
         private Segmentation segmentation;
+        
+        @JsonProperty("parent_mode")
+        private String parentMode;  // paragraph, full-doc
+        
+        @JsonProperty("subchunk_segmentation")
+        private Segmentation subchunkSegmentation;  // 子分段配置
     }
 
     @Data

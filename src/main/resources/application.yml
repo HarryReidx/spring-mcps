@@ -44,9 +44,15 @@ app:
   
   # 文档分段配置
   chunking:
-    separator: "\n"      # 分段分隔符
-    max-tokens: 1000     # 最大 token 数
-    chunk-overlap: 50    # 分段重叠
+    separator: "\n"      # 分段分隔符（文本模型）
+    max-tokens: 1000     # 最大 token 数（文本模型）
+    chunk-overlap: 50    # 分段重叠（文本模型）
+  
+  # 父子分段配置
+  hierarchical:
+    max-tokens: 1024         # 父分段最大 token 数
+    sub-max-tokens: 512      # 子分段最大 token 数
+    chunk-overlap: 50        # 分段重叠 token 数
   
   # VLM 视觉模型配置
   vlm:

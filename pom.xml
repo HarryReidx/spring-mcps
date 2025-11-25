@@ -55,7 +55,7 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
+            <!-- 去掉 runtime scope，以便编译时可以使用 PGobject -->
         </dependency>
 
         <!-- Spring Data JDBC -->

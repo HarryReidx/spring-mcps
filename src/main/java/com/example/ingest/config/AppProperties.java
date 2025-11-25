@@ -24,6 +24,9 @@ public class AppProperties {
     /** 文档分段配置 */
     private ChunkingConfig chunking = new ChunkingConfig();
     
+    /** 父子分段配置 */
+    private HierarchicalConfig hierarchical = new HierarchicalConfig();
+    
     /** VLM 视觉模型配置 */
     private VlmConfig vlm = new VlmConfig();
 
@@ -79,7 +82,7 @@ public class AppProperties {
     }
 
     /**
-     * 文档分段配置
+     * 文档分段配置（文本模型）
      */
     @Data
     public static class ChunkingConfig {
@@ -90,6 +93,21 @@ public class AppProperties {
         private Integer maxTokens = 1000;
         
         /** 分段重叠 */
+        private Integer chunkOverlap = 50;
+    }
+
+    /**
+     * 父子分段配置（层级模型）
+     */
+    @Data
+    public static class HierarchicalConfig {
+        /** 父分段最大 token 数 */
+        private Integer maxTokens = 1024;
+        
+        /** 子分段最大 token 数 */
+        private Integer subMaxTokens = 512;
+        
+        /** 分段重叠 token 数 */
         private Integer chunkOverlap = 50;
     }
 

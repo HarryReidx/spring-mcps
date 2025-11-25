@@ -25,8 +25,11 @@ public class IngestRequest {
     /** 分块模式: AUTO, CUSTOM */
     private String chunkingMode = "AUTO";
     
-    /** 最大 token 数（CUSTOM 模式下生效） */
+    /** 最大 token 数（CUSTOM 模式下生效，父子结构为父分段 token 数） */
     private Integer maxTokens;
+    
+    /** 子分段最大 token 数（父子结构模式下生效） */
+    private Integer subMaxTokens;
     
     /** 分块重叠（CUSTOM 模式下生效） */
     private Integer chunkOverlap;
@@ -41,5 +44,5 @@ public class IngestRequest {
     private String indexingTechnique = "high_quality";
     
     /** 文档形式: text_model, hierarchical_model */
-    private String docForm = "text_model";
+    private String docForm = "hierarchical_model";  // 默认使用父子结构
 }

@@ -34,8 +34,9 @@ public class VlmClient {
     
     private OkHttpClient getHttpClient() {
         return new OkHttpClient.Builder()
-                .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
+                .connectTimeout(90, TimeUnit.SECONDS)
+                .readTimeout(180, TimeUnit.SECONDS)  // 增加到 3 分钟，解决超时问题
+                .writeTimeout(90, TimeUnit.SECONDS)
                 .build();
     }
 
@@ -66,6 +67,7 @@ public class VlmClient {
      * 同步分析图片
      */
     private ImageAnalysisResult analyzeImage(String imageUrl, String imageName) throws IOException {
+        long startTime = System.currentTimeMillis();
         log.info("开始 VLM 分析图片: {}", imageName);
         
         AppProperties.VlmConfig vlmConfig = appProperties.getVlm();
@@ -119,14 +121,16 @@ public class VlmClient {
                 ocrText = parts[1].trim();
             }
             
-            log.info("VLM 分析完成: {} - 描述长度={}, OCR长度={}", 
-                    imageName, description.length(), ocrText.length());
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("VLM 分析完成: {} - 描述长度={}, OCR长度={}, 耗时={}ms", 
+                    imageName, description.length(), ocrText.length(), duration);
             
             return ImageAnalysisResult.builder()
                     .imageName(imageName)
                     .description(description)
                     .ocrText(ocrText)
                     .success(true)
+                    .duration(duration)
                     .build();
         }
     }
@@ -156,11 +160,14 @@ public class VlmClient {
 
     /**
      * 检测 VLM 提供商类型
+     * 支持：OpenAI, Ollama, Qwen (通义千问)
      */
     private VlmProvider detectProvider(String baseUrl) {
         if (baseUrl.contains("11434") || baseUrl.contains("ollama")) {
             return VlmProvider.OLLAMA;
         }
+        // Qwen 通义千问通常兼容 OpenAI 格式
+        // 可以通过 model 名称判断，或者使用相同的 OpenAI 格式
         return VlmProvider.OPENAI;
     }
 
@@ -232,5 +239,6 @@ public class VlmClient {
         private String description;
         private String ocrText;
         private boolean success;
+        private long duration;  // VLM 请求耗时（毫秒）
     }
 }
