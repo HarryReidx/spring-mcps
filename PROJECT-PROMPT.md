@@ -28,27 +28,56 @@
 
 1. **完整的文档处理流程**
    - 文件下载（支持 HTTP/HTTPS）
+   - 格式转换（预留接口）
    - MinerU 解析（图文混合）
    - 图片路径替换（PostgreSQL + MinIO）
    - Dify 知识库入库
 
-2. **核心实现**
-   - `DocumentIngestController`: HTTP 接口层
+2. **语义增强 RAG**
+   - VLM 视觉理解（支持 OpenAI、Qwen、Ollama）
+   - 标题上下文注入
+   - 图片描述增强
+   - 父子分段优化
+   - 表格防截断处理
+
+3. **任务管理系统**
+   - 同步入库（立即返回）
+   - 异步任务（后台处理）
+   - 任务状态跟踪
+   - 详细执行报告
+   - 统计信息查询
+
+4. **前端监控大屏**
+   - Vue 3 + Element Plus
+   - 统计概览页
+   - 任务列表页（分页、筛选）
+   - 任务详情页（Markdown 预览）
+
+5. **核心实现**
+   - `DocumentIngestController`: 同步入库接口
+   - `IngestTaskController`: 任务管理接口
    - `DocumentIngestService`: 核心业务逻辑
+   - `SemanticTextProcessor`: 语义文本处理
+   - `IngestTaskService`: 任务管理服务
+   - `VlmClient`: VLM 视觉理解客户端
    - `MineruClient`: MinerU API 调用
    - `DifyClient`: Dify API 调用
-   - `ToolFileRepository`: 数据库查询
 
-3. **关键特性**
-   - 优雅降级：无数据库也能运行
+6. **关键特性**
+   - 优雅降级：VLM 失败不影响主流程
    - 错误处理：全局异常捕获
    - 灵活配置：支持环境变量覆盖
    - 精确替换：保留 Markdown 图片语法
+   - 性能优化：VLM 并发调用、超时优化
+   - 分块策略：支持文本模型和层级模型
 
-4. **测试验证**
+7. **测试验证**
    - MinerU 解析成功
    - 图片路径替换成功
+   - VLM 分析成功
    - Dify API 调用成功
+   - 任务管理系统正常
+   - 前端监控正常
    - 端到端流程验证通过
 
 ### 技术栈
@@ -65,30 +94,57 @@
 com.example.ingest
 ├── DifyIngestApplication.java          # 启动类
 ├── controller/
-│   └── DocumentIngestController.java   # HTTP 接口
+│   ├── DocumentIngestController.java   # 同步入库接口
+│   └── IngestTaskController.java       # 任务管理接口
 ├── service/
-│   └── DocumentIngestService.java      # 核心业务逻辑
+│   ├── DocumentIngestService.java      # 核心业务逻辑
+│   ├── SemanticTextProcessor.java      # 语义文本处理器
+│   └── IngestTaskService.java          # 任务管理服务
 ├── client/
 │   ├── MineruClient.java               # MinerU 客户端
-│   └── DifyClient.java                 # Dify 客户端
+│   ├── DifyClient.java                 # Dify 客户端
+│   └── VlmClient.java                  # VLM 视觉理解客户端
 ├── repository/
-│   └── ToolFileRepository.java         # 数据库查询
+│   ├── ToolFileRepository.java         # 图片文件数据访问
+│   └── IngestTaskRepository.java       # 任务数据访问
 ├── entity/
-│   └── ToolFile.java                   # tool_files 表实体
-├── model/                              # DTO 模型（6 个类）
+│   ├── ToolFile.java                   # tool_files 表实体
+│   └── IngestTask.java                 # ingest_tasks 表实体
+├── model/                              # DTO 模型
 │   ├── IngestRequest.java
 │   ├── IngestResponse.java
 │   ├── MineruParseRequest.java
 │   ├── MineruParseResponse.java
 │   ├── DifyCreateDocumentRequest.java
 │   └── DifyCreateDocumentResponse.java
-├── config/                             # 配置类（2 个类）
-│   ├── AppProperties.java
-│   └── ObjectMapperConfig.java
-└── exception/                          # 异常处理（3 个类）
+├── config/                             # 配置类
+│   ├── AppProperties.java              # 应用配置
+│   ├── AsyncConfig.java                # 异步任务配置
+│   ├── ObjectMapperConfig.java         # JSON 配置
+│   └── RequestCleanupFilter.java       # 请求清理过滤器
+└── exception/                          # 异常处理
     ├── MineruException.java
     ├── DifyException.java
     └── GlobalExceptionHandler.java
+
+frontend/                               # 前端监控系统
+├── src/
+│   ├── api/
+│   │   └── task.js                     # API 接口封装
+│   ├── views/
+│   │   ├── Dashboard.vue               # 统计概览页
+│   │   ├── TaskList.vue                # 任务列表页
+│   │   └── TaskDetail.vue              # 任务详情页
+│   ├── App.vue                         # 根组件
+│   └── main.js                         # 入口文件
+├── index.html
+├── vite.config.js                      # Vite 配置
+└── package.json                        # 依赖配置
+
+sql/                                    # 数据库脚本
+├── 001_create_ingest_tasks_table.sql   # 创建任务表
+├── 002_add_execution_mode.sql          # 添加执行模式字段
+└── 004_change_jsonb_to_text.sql        # 修改字段类型
 ```
 
 ### 配置信息
@@ -102,45 +158,116 @@ spring:
     password: difyai123456
 
 app:
+  # Dify API 配置
   dify:
     api-key: dataset-CxGlfh0xHkUoCts6dj17XUhw
     base-url: http://172.24.0.5/v1
+  
+  # MinerU 服务配置
   mineru:
     base-url: http://172.24.0.5:8000
     server-type: local
+    parse-method: auto
+    enable-formula: true
+    enable-table: true
+  
+  # MinIO 存储配置
   minio:
     img-path-prefix: http://172.24.0.5:9000/ty-ai-flow
-  chunking:
-    separator: "\n"
-    max-tokens: 1000
-    chunk-overlap: 50
+  
+  # 父子分段配置（层级模型）
+  hierarchical:
+    max-tokens: 1024         # 父分段最大 token 数
+    sub-max-tokens: 512      # 子分段最大 token 数
+    chunk-overlap: 50        # 分段重叠 token 数
+  
+  # VLM 视觉模型配置
+  vlm:
+    base-url: http://172.24.0.5:11434/api/chat
+    model: qwen2.5vl:7b
+    max-tokens: 10000
 ```
 
 ### API 接口
 
-**POST /api/dify/document/ingest**
-```json
-// 请求
+**1. 同步文档入库**
+```http
+POST /api/dify/document/ingest
+
+请求体：
 {
   "datasetId": "xxx",
   "fileUrl": "http://xxx/file.pdf",
   "fileName": "file.pdf",
-  "fileType": "pdf"
+  "fileType": "pdf",
+  "docForm": "hierarchical_model",
+  "enableVlm": true,
+  "maxTokens": 1024,
+  "subMaxTokens": 512,
+  "chunkOverlap": 50
 }
 
-// 响应
+响应：
 {
   "success": true,
   "fileIds": ["doc-id-xxx"],
   "stats": {
     "imageCount": 5,
-    "chunkCount": 1
+    "chunkCount": 10
   }
 }
 ```
 
-**GET /api/dify/document/health**
-- 响应: `OK`
+**2. 创建异步任务**
+```http
+POST /api/dify/tasks
+
+请求体：同上
+
+响应：
+{
+  "success": true,
+  "taskId": "uuid",
+  "message": "任务已创建，正在后台处理"
+}
+```
+
+**3. 查询任务详情**
+```http
+GET /api/dify/tasks/{taskId}
+
+响应：
+{
+  "id": "uuid",
+  "status": "COMPLETED",
+  "resultSummary": "{\"imageCount\":5,\"chunkCount\":10}",
+  "parsedMarkdown": "# 标题\n内容..."
+}
+```
+
+**4. 查询任务列表**
+```http
+GET /api/dify/tasks?page=0&size=20&status=COMPLETED&mode=SYNC
+```
+
+**5. 获取统计信息**
+```http
+GET /api/dify/tasks/stats
+
+响应：
+{
+  "totalCount": 100,
+  "completedCount": 85,
+  "successRate": "85.00%"
+}
+```
+
+**6. 健康检查**
+```http
+GET /api/dify/document/health
+
+响应：OK
+```
 
 ---
 
@@ -156,7 +283,7 @@ app:
 2. **重试机制**
    - MinerU 调用失败重试
    - Dify API 调用失败重试
-   - 数据库查询失败重试
+   - VLM 调用失败重试（部分已实现降级）
    - 建议：使用 Spring Retry
 
 3. **大文件处理优化**
@@ -166,20 +293,20 @@ app:
 
 ### 中优先级
 
-4. **异步处理**
-   - 引入消息队列（RabbitMQ/Kafka）
-   - 异步文档处理
-   - 进度查询接口
-
-5. **监控增强**
+4. **监控增强**
    - 添加 Prometheus 指标
    - 自定义业务指标
    - 告警规则
 
-6. **测试完善**
+5. **测试完善**
    - 单元测试
    - 集成测试
    - 性能测试
+
+6. **VLM 缓存机制**
+   - 图片分析结果缓存
+   - 减少重复调用
+   - 提升性能
 
 ### 低优先级
 
@@ -192,6 +319,15 @@ app:
    - API 认证
    - 请求限流
    - 文件类型校验
+
+### 已完成 ✅
+
+- ✅ 异步处理（任务管理系统）
+- ✅ 进度查询接口（任务状态跟踪）
+- ✅ 前端监控大屏（Vue 3）
+- ✅ VLM 超时优化（180s）
+- ✅ Markdown 分段优化（父子结构）
+- ✅ 多 VLM 提供商支持（OpenAI、Qwen、Ollama）
 
 ---
 
@@ -332,9 +468,17 @@ public DocumentIngestService(...,
 
 ---
 
+## 相关文档
+
+- `README.md` - 项目说明、功能清单和快速开始
+- `ARCHITECTURE.md` - 系统架构和核心组件详解
+- `DEPLOYMENT.md` - 完整部署指南
+- `PROJECT-PROMPT.md` - 本文件（项目提示文档）
+- `frontend/README.md` - 前端项目说明
+
 ## 联系信息
 
 - **项目位置**: `D:\1-workspace\1-tsingyun-ws\5-ai\spring-mcps`
 - **版本**: 0.0.1-SNAPSHOT
-- **最后更新**: 2025-11-21
-- **状态**: ✅ 生产就绪
+- **最后更新**: 2025-11-25
+- **状态**: ✅ 生产就绪（包含完整的任务管理和前端监控系统）

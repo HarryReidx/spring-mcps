@@ -1,11 +1,18 @@
-# 部署说明
+# Dify 文档入库服务 - 部署指南
+
+本文档详细说明如何部署后端服务和前端监控系统。
 
 ## 环境要求
 
+### 后端
 - JDK 17 或更高版本
 - Maven 3.6+（仅编译时需要）
-- PostgreSQL 12+（可选，用于图片路径替换）
+- PostgreSQL 12+（必需，用于图片路径替换和任务管理）
 - 网络访问：MinerU、Dify API、MinIO
+
+### 前端
+- Node.js 16 或更高版本
+- npm 或 yarn 包管理器
 
 ## 当前环境配置
 
@@ -28,7 +35,73 @@
 
 ## 部署步骤
 
-### 1. 编译打包
+### 0. 数据库初始化
+
+执行 SQL 脚本创建任务表：
+
+```bash
+# Windows
+psql -U postgres -d dify -f sql\001_create_ingest_tasks_table.sql
+psql -U postgres -d dify -f sql\002_add_execution_mode.sql
+psql -U postgres -d dify -f sql\004_change_jsonb_to_text.sql
+
+# Linux/Mac
+psql -U postgres -d dify -f sql/001_create_ingest_tasks_table.sql
+psql -U postgres -d dify -f sql/002_add_execution_mode.sql
+psql -U postgres -d dify -f sql/004_change_jsonb_to_text.sql
+```
+
+或手动执行 SQL：
+
+```sql
+-- 连接数据库
+psql -U postgres -d dify
+
+-- 创建任务表
+CREATE TABLE ingest_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dataset_id VARCHAR(255) NOT NULL,
+    file_name VARCHAR(500) NOT NULL,
+    file_url TEXT,
+    file_type VARCHAR(50),
+    status VARCHAR(50) NOT NULL,
+    execution_mode VARCHAR(20),
+    enable_vlm BOOLEAN DEFAULT FALSE,
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    error_msg TEXT,
+    result_summary TEXT,
+    parsed_markdown TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX idx_ingest_tasks_status ON ingest_tasks(status);
+CREATE INDEX idx_ingest_tasks_dataset_id ON ingest_tasks(dataset_id);
+CREATE INDEX idx_ingest_tasks_created_at ON ingest_tasks(created_at DESC);
+
+-- 创建更新时间触发器
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_ingest_tasks_updated_at BEFORE UPDATE
+    ON ingest_tasks FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+```
+
+验证：
+```sql
+\dt ingest_tasks
+SELECT * FROM ingest_tasks LIMIT 1;
+```
+
+### 1. 编译打包后端
 
 ```bash
 cd /path/to/spring-mcps
@@ -99,13 +172,63 @@ sudo systemctl status dify-ingest
 sudo journalctl -u dify-ingest -f
 ```
 
-### 4. 验证部署
+### 4. 部署前端（可选）
+
+#### 开发模式
 
 ```bash
-# 健康检查
-curl http://localhost:8080/api/dify/document/health
+cd frontend
+npm install
+npm run dev
+```
 
+访问：http://localhost:5173
+
+#### 生产部署
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+构建产物在 `dist/` 目录，可以部署到 Nginx：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    root /path/to/frontend/dist;
+    index index.html;
+    
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    
+    location /api/ {
+        proxy_pass http://localhost:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### 5. 验证部署
+
+```bash
+# 后端健康检查
+curl http://localhost:8080/api/dify/document/health
 # 预期响应: OK
+
+# 任务统计
+curl http://localhost:8080/api/dify/tasks/stats
+# 预期响应: JSON 统计信息
+
+# 前端访问（如已部署）
+# 浏览器访问: http://localhost:5173
 ```
 
 ## 配置说明
@@ -349,7 +472,66 @@ cp src/main/resources/application.yml application.yml.backup
 2. 重新编译打包
 3. 重启服务
 
+## 部署检查清单
+
+### 部署前检查
+
+- [ ] JDK 17+ 已安装
+- [ ] Maven 已安装（或使用 mvnw）
+- [ ] PostgreSQL 12+ 已安装并运行
+- [ ] Node.js 16+ 已安装（如需前端）
+- [ ] 数据库 `dify` 已创建
+- [ ] 数据库连接配置正确
+- [ ] MinerU 服务可访问
+- [ ] Dify API 可访问
+
+### 部署后验证
+
+```bash
+# 1. 后端健康检查
+curl http://localhost:8080/api/dify/document/health
+# 预期: OK
+
+# 2. 任务统计
+curl http://localhost:8080/api/dify/tasks/stats
+# 预期: JSON 统计信息
+
+# 3. 创建测试任务
+curl -X POST http://localhost:8080/api/dify/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "datasetId": "test",
+    "fileUrl": "http://example.com/test.pdf",
+    "fileName": "test.pdf",
+    "fileType": "pdf"
+  }'
+# 预期: 返回任务 ID
+
+# 4. 前端访问（如已部署）
+# 浏览器访问: http://localhost:5173
+```
+
+### 数据库验证
+
+```sql
+-- 查看表结构
+\d ingest_tasks
+
+-- 查看任务列表
+SELECT id, file_name, status, execution_mode, created_at 
+FROM ingest_tasks 
+ORDER BY created_at DESC 
+LIMIT 10;
+
+-- 统计各状态任务数
+SELECT status, COUNT(*) 
+FROM ingest_tasks 
+GROUP BY status;
+```
+
 ## 升级
+
+### 升级步骤
 
 1. 停止服务：
    ```bash
@@ -367,12 +549,33 @@ cp src/main/resources/application.yml application.yml.backup
    mvn clean package -DskipTests
    ```
 
-4. 启动服务：
+4. 执行数据库升级脚本（如有）：
+   ```bash
+   psql -U postgres -d dify -f sql/002_add_execution_mode.sql
+   ```
+
+5. 启动服务：
    ```bash
    sudo systemctl start dify-ingest
    ```
 
-5. 验证：
+6. 验证：
    ```bash
    curl http://localhost:8080/api/dify/document/health
+   curl http://localhost:8080/api/dify/tasks/stats
    ```
+
+### 回滚
+
+如果升级失败，可以快速回滚：
+
+```bash
+# 1. 停止服务
+sudo systemctl stop dify-ingest
+
+# 2. 恢复备份
+cp dify-ingest-backup.jar target/dify-ingest-0.0.1-SNAPSHOT.jar
+
+# 3. 启动服务
+sudo systemctl start dify-ingest
+```

@@ -1,20 +1,68 @@
-# 语义增强 RAG 架构说明
+# Dify 文档入库服务 - 架构说明
+
+本文档详细说明系统的架构设计、核心组件和数据流。
+
+## 系统架构
+
+### 整体架构
+
+```
+┌─────────────┐
+│   用户请求   │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│      Controller 层（HTTP 接口）      │
+│  - DocumentIngestController         │
+│  - IngestTaskController             │
+└──────┬──────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│       Service 层（业务逻辑）         │
+│  - DocumentIngestService            │
+│  - SemanticTextProcessor            │
+│  - IngestTaskService                │
+└──────┬──────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│      Client 层（外部服务）           │
+│  - MineruClient                     │
+│  - DifyClient                       │
+│  - VlmClient                        │
+└─────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│     Repository 层（数据访问）        │
+│  - ToolFileRepository               │
+│  - IngestTaskRepository             │
+└─────────────────────────────────────┘
+```
 
 ## 核心组件
 
 ### 1. VlmClient (视觉理解客户端)
 
-**职责**：调用视觉语言模型（GPT-4o/Claude-3.5）分析图片
+**职责**：调用视觉语言模型分析图片
+
+**支持的 VLM 提供商**：
+- OpenAI (gpt-4o, gpt-4-vision-preview)
+- Qwen (qwen-vl-max, qwen-vl-plus)
+- Ollama (qwen2.5vl:7b, llava)
 
 **关键方法**：
 - `analyzeImageAsync()`: 异步分析单张图片
 - `analyzeImage()`: 同步分析图片
 - `buildVisionRequest()`: 构建 Vision API 请求
 
-**特性**：
-- 支持并发调用，使用 `CompletableFuture`
-- 返回图片描述 + OCR 文字
-- 失败时返回降级结果，不影响主流程
+**性能优化**：
+- 超时优化：connectTimeout 90s, readTimeout 180s
+- 并发调用：使用 `CompletableFuture`
+- 耗时监控：记录每个请求的执行时间
+- 失败降级：返回降级结果，不影响主流程
 
 ### 2. SemanticTextProcessor (语义文本处理器)
 
@@ -32,15 +80,21 @@
 - 保留原始 URL，确保图片可访问
 - 失败时保持原样，不影响文档完整性
 
+#### 2.3 父子分段优化
+- 检测是否使用默认分段策略
+- 自动替换标题格式：`#` → `{{>1#}}`（父子分段标识）
+- 保护表格内的换行符，防止截断
+
 **关键方法**：
 - `enrichMarkdown()`: 主入口
 - `parseHeaders()`: 解析标题结构
 - `injectHeaderContext()`: 注入标题上下文
 - `enrichImageDescriptions()`: 增强图片描述
+- `preprocessFormatting()`: 格式预处理
 
 ### 3. DocumentIngestService (文档入库服务)
 
-**重构后的流程**：
+**完整流程**：
 
 ```
 1. 下载文件
@@ -55,9 +109,12 @@
    ├─ [可选] VLM 并发分析图片
    ├─ 解析标题结构
    ├─ 注入标题上下文
-   └─ 增强图片描述
+   ├─ 增强图片描述
+   └─ 父子分段优化
    ↓
 6. 构建 Dify 请求 (动态 process_rule)
+   ├─ 文本模型 (text_model)
+   └─ 层级模型 (hierarchical_model)
    ↓
 7. 调用 Dify create-by-text API
    ↓
@@ -66,11 +123,41 @@
 9. 返回结果
 ```
 
-**新增方法**：
+**关键方法**：
+- `ingestDocument()`: 主入口（同步）
 - `performSemanticEnrichment()`: 执行语义增强
 - `analyzeImagesWithVlm()`: 并发调用 VLM 分析图片
 - `getImageRealUrls()`: 获取图片真实 URL
-- `buildDifyRequest()`: 动态构建 Dify 请求（支持 AUTO/CUSTOM 模式）
+- `buildDifyRequest()`: 动态构建 Dify 请求
+- `replaceImagePaths()`: 精确替换图片路径
+
+### 4. IngestTaskService (任务管理服务)
+
+**职责**：管理异步任务的生命周期
+
+**核心功能**：
+- 创建任务记录（PENDING 状态）
+- 异步执行任务（@Async）
+- 更新任务状态（PROCESSING → COMPLETED/FAILED）
+- 记录执行结果和错误信息
+- 提供统计信息
+
+**关键方法**：
+- `createAndExecuteTask()`: 创建并执行任务
+- `executeTask()`: 异步执行任务
+- `getTaskById()`: 查询任务详情
+- `getTasks()`: 分页查询任务列表
+- `getStats()`: 获取统计信息
+
+**任务状态**：
+- `PENDING` - 待处理
+- `PROCESSING` - 处理中
+- `COMPLETED` - 已完成
+- `FAILED` - 失败
+
+**执行模式**：
+- `SYNC` - 同步执行
+- `ASYNC` - 异步执行
 
 ## 数据流
 
@@ -202,17 +289,56 @@ app:
 2. 配置文件默认值
 3. 硬编码默认值
 
+## 数据库设计
+
+### ingest_tasks 表
+
+```sql
+CREATE TABLE ingest_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dataset_id VARCHAR(255) NOT NULL,
+    file_name VARCHAR(500) NOT NULL,
+    file_url TEXT,
+    file_type VARCHAR(50),
+    status VARCHAR(50) NOT NULL,
+    execution_mode VARCHAR(20),
+    enable_vlm BOOLEAN DEFAULT FALSE,
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    error_msg TEXT,
+    result_summary TEXT,
+    parsed_markdown TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_ingest_tasks_status ON ingest_tasks(status);
+CREATE INDEX idx_ingest_tasks_dataset_id ON ingest_tasks(dataset_id);
+CREATE INDEX idx_ingest_tasks_created_at ON ingest_tasks(created_at DESC);
+```
+
+### tool_files 表（已有）
+
+```sql
+-- 用于图片路径替换
+SELECT file_key FROM tool_files WHERE name = ?
+```
+
 ## 扩展性
 
 ### 支持更多 VLM 提供商
 只需修改 `VlmClient.buildVisionRequest()` 方法，适配不同的 API 格式：
-- OpenAI GPT-4o
+- ✅ OpenAI GPT-4o
+- ✅ Qwen (qwen-vl-max, qwen-vl-plus)
+- ✅ Ollama (qwen2.5vl:7b, llava)
 - Anthropic Claude-3.5
 - Google Gemini Vision
-- 本地部署的开源模型
 
 ### 支持更多语义增强策略
 在 `SemanticTextProcessor` 中添加新方法：
+- ✅ 标题上下文注入
+- ✅ 图片描述增强
+- ✅ 父子分段优化
 - 实体识别和链接
 - 关键词提取和注入
 - 摘要生成
@@ -223,3 +349,27 @@ app:
 - LibreOffice (doc/docx/ppt/pptx)
 - Pandoc (markdown/html)
 - 其他转换工具
+
+## 前端架构
+
+### 技术栈
+- Vue 3 + Composition API
+- Element Plus UI 组件库
+- Vue Router 路由管理
+- Axios HTTP 客户端
+- Highlight.js 语法高亮
+
+### 页面结构
+```
+App.vue (根组件)
+├── Dashboard.vue (统计概览)
+├── TaskList.vue (任务列表)
+└── TaskDetail.vue (任务详情)
+```
+
+### 核心功能
+- 实时统计展示
+- 任务列表分页查询
+- 任务状态筛选
+- Markdown 预览（语法高亮）
+- 一键复制功能
