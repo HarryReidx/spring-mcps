@@ -6,22 +6,22 @@ const api = axios.create({
 })
 
 export const taskApi = {
-  // 获取统计信息
   getStats() {
     return api.get('/tasks/stats')
   },
   
-  // 获取任务列表
   getTasks(params) {
     return api.get('/tasks', { params })
   },
   
-  // 获取任务详情
   getTask(taskId) {
-    return api.get(`/tasks/${taskId}`)
+    return api.get(`/document/task/${taskId}`)
   },
   
-  // 创建任务
+  getTaskLogs(taskId) {
+    return api.get(`/document/task/${taskId}/logs`)
+  },
+  
   createTask(data) {
     return api.post('/tasks', data)
   }

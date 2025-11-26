@@ -69,6 +69,12 @@ public class IngestTask {
     @Column("parsed_markdown")
     private String parsedMarkdown;
     
+    @Column("vlm_cost_time")
+    private Long vlmCostTime;  // VLM 处理耗时（毫秒）
+    
+    @Column("total_cost_time")
+    private Long totalCostTime;  // 总耗时（毫秒）
+    
     /**
      * 任务状态枚举
      */

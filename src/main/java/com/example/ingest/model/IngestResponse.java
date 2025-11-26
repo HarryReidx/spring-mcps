@@ -25,26 +25,21 @@ public class IngestResponse {
     /** 统计信息 */
     private Stats stats;
 
-    /**
-     * 错误信息
-     */
     private String errorMsg;
+    
+    private Long vlmCostTime;
+    
+    private Long totalCostTime;
 
-    /**
-     * 统计信息
-     */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Stats {
-        /** 图片数量 */
         private Integer imageCount;
-        
-        /** 分段数量 */
         private Integer chunkCount;
     }
-    // 是否成功
+    
     public Boolean isSuccess() {
         return success;
     }

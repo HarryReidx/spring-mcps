@@ -29,7 +29,8 @@ public class VlmClient {
     
     private enum VlmProvider {
         OPENAI,
-        OLLAMA
+        QWEN,
+        MODELVERSE
     }
     
     private OkHttpClient getHttpClient() {
@@ -75,24 +76,20 @@ public class VlmClient {
         
         log.debug("检测到 VLM 提供商: {}", provider);
         
-        // Ollama 需要下载图片并转换为 base64
+        // 所有提供商都使用 URL 模式（OpenAI 兼容）
         String imageData = imageUrl;
-        if (provider == VlmProvider.OLLAMA) {
-            imageData = downloadAndEncodeImage(imageUrl);
-            log.debug("图片已转换为 base64，长度: {}", imageData.length());
-        }
         
         // 构建请求体（根据提供商类型）
         String requestBody = buildVisionRequest(imageData, vlmConfig.getPrompt(), provider);
         
-        // 构建请求（Ollama 不需要 Authorization header）
+        // 构建请求
         Request.Builder requestBuilder = new Request.Builder()
                 .url(vlmConfig.getBaseUrl())
                 .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
                 .addHeader("Content-Type", "application/json");
         
-        // OpenAI 需要 Authorization header
-        if (provider == VlmProvider.OPENAI && vlmConfig.getApiKey() != null && !vlmConfig.getApiKey().isEmpty()) {
+        // 添加 Authorization header
+        if (vlmConfig.getApiKey() != null && !vlmConfig.getApiKey().isEmpty()) {
             requestBuilder.addHeader("Authorization", "Bearer " + vlmConfig.getApiKey());
         }
         
@@ -160,71 +157,49 @@ public class VlmClient {
 
     /**
      * 检测 VLM 提供商类型
-     * 支持：OpenAI, Ollama, Qwen (通义千问)
      */
     private VlmProvider detectProvider(String baseUrl) {
-        if (baseUrl.contains("11434") || baseUrl.contains("ollama")) {
-            return VlmProvider.OLLAMA;
+        String provider = appProperties.getVlm().getProvider();
+        if (provider != null && !provider.isEmpty()) {
+            switch (provider.toLowerCase()) {
+                case "qwen": return VlmProvider.QWEN;
+                case "modelverse": return VlmProvider.MODELVERSE;
+                case "openai": return VlmProvider.OPENAI;
+            }
         }
-        // Qwen 通义千问通常兼容 OpenAI 格式
-        // 可以通过 model 名称判断，或者使用相同的 OpenAI 格式
+        // 自动检测
+        if (baseUrl.contains("dashscope.aliyuncs.com")) return VlmProvider.QWEN;
+        if (baseUrl.contains("modelverse.cn")) return VlmProvider.MODELVERSE;
         return VlmProvider.OPENAI;
     }
 
     /**
-     * 解析响应（根据提供商类型）
+     * 解析响应（OpenAI 兼容格式）
      */
     private String parseResponse(String responseBody, VlmProvider provider) throws IOException {
         JsonNode root = objectMapper.readTree(responseBody);
-        
-        if (provider == VlmProvider.OLLAMA) {
-            // Ollama 响应格式: {"message": {"content": "..."}}
-            return root.path("message").path("content").asText();
-        } else {
-            // OpenAI 响应格式: {"choices": [{"message": {"content": "..."}}]}
-            return root.path("choices").get(0).path("message").path("content").asText();
-        }
+        // 所有提供商都使用 OpenAI 兼容格式
+        return root.path("choices").get(0).path("message").path("content").asText();
     }
 
     /**
-     * 构建 Vision API 请求体（根据提供商类型）
-     * 
-     * @param imageData 对于 Ollama 是 base64 字符串，对于 OpenAI 是 URL
+     * 构建 Vision API 请求体（OpenAI 兼容格式）
      */
     private String buildVisionRequest(String imageData, String prompt, VlmProvider provider) throws IOException {
-        Map<String, Object> requestMap;
-        
-        if (provider == VlmProvider.OLLAMA) {
-            // Ollama 格式: /api/chat
-            // images 字段需要 base64 编码的图片数据
-            requestMap = Map.of(
-                    "model", appProperties.getVlm().getModel(),
-                    "messages", List.of(
-                            Map.of(
-                                    "role", "user",
-                                    "content", prompt,
-                                    "images", List.of(imageData)  // base64 字符串
-                            )
-                    ),
-                    "stream", false
-            );
-        } else {
-            // OpenAI 格式: /v1/chat/completions
-            // image_url 字段使用 URL
-            requestMap = Map.of(
-                    "model", appProperties.getVlm().getModel(),
-                    "messages", List.of(
-                            Map.of(
-                                    "role", "user",
-                                    "content", List.of(
-                                            Map.of("type", "text", "text", prompt),
-                                            Map.of("type", "image_url", "image_url", Map.of("url", imageData))
-                                    )
-                            )
-                    ),
-                    "max_tokens", appProperties.getVlm().getMaxTokens()
-            );
-        }
+        // 所有提供商都使用 OpenAI 兼容格式
+        Map<String, Object> requestMap = Map.of(
+                "model", appProperties.getVlm().getModel(),
+                "messages", List.of(
+                        Map.of(
+                                "role", "user",
+                                "content", List.of(
+                                        Map.of("type", "text", "text", prompt),
+                                        Map.of("type", "image_url", "image_url", Map.of("url", imageData))
+                                )
+                        )
+                ),
+                "max_tokens", appProperties.getVlm().getMaxTokens()
+        );
         
         return objectMapper.writeValueAsString(requestMap);
     }

@@ -60,58 +60,6 @@ public class IngestTaskService {
     }
     
     /**
-     * 同步执行任务并入库
-     * 
-     * @param request 入库请求
-     * @return 入库响应
-     */
-    public IngestResponse executeTaskSync(IngestRequest request) {
-        log.info("开始同步执行任务: fileName={}", request.getFileName());
-        
-        // 1. 创建任务记录
-        IngestTask task = IngestTask.builder()
-                .datasetId(request.getDatasetId())
-                .fileName(request.getFileName())
-                .fileUrl(request.getFileUrl())
-                .fileType(request.getFileType())
-                .enableVlm(request.getEnableVlm())
-                .status(IngestTask.TaskStatus.PROCESSING)
-                .executionMode(IngestTask.ExecutionMode.SYNC)  // 同步模式
-                .startTime(LocalDateTime.now())
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-        
-        task = taskRepository.save(task);
-        log.info("创建同步任务: id={}, fileName={}", task.getId(), task.getFileName());
-        
-        try {
-            // 2. 执行文档入库
-            IngestResponse response = documentIngestService.ingestDocument(request, IngestTask.ExecutionMode.SYNC);
-            
-            // 3. 更新任务结果
-            if (response.isSuccess()) {
-                updateTaskSuccess(task.getId(), response);
-            } else {
-                updateTaskFailure(task.getId(), response.getErrorMsg());
-            }
-            
-            return response;
-            
-        } catch (Exception e) {
-            log.error("同步任务执行失败: {}", task.getId(), e);
-            updateTaskFailure(task.getId(), e.getMessage());
-            
-            // 返回失败响应
-            return IngestResponse.builder()
-                    .success(false)
-                    .errorMsg(e.getMessage())
-                    .fileIds(java.util.Collections.emptyList())
-                    .build();
-        }
-    }
-    
-    /**
      * 异步执行任务
      */
     @Async
@@ -123,7 +71,7 @@ public class IngestTaskService {
         
         try {
             // 2. 执行文档入库
-            IngestResponse response = documentIngestService.ingestDocument(request, IngestTask.ExecutionMode.ASYNC);
+            IngestResponse response = documentIngestService.ingestDocument(request, IngestTask.ExecutionMode.ASYNC, taskId);
             
             // 3. 更新任务结果
             if (response.isSuccess()) {
@@ -163,6 +111,8 @@ public class IngestTaskService {
         taskRepository.findById(taskId).ifPresent(task -> {
             task.setStatus(IngestTask.TaskStatus.COMPLETED);
             task.setEndTime(LocalDateTime.now());
+            task.setVlmCostTime(response.getVlmCostTime());
+            task.setTotalCostTime(response.getTotalCostTime());
             
             // 构建结果摘要
             Map<String, Object> summary = new HashMap<>();

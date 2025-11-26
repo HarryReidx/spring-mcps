@@ -64,9 +64,14 @@
             {{ formatTime(row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="耗时" width="100">
+        <el-table-column label="VLM耗时" width="100">
           <template #default="{ row }">
-            {{ getDuration(row) }}
+            {{ row.vlmCostTime ? row.vlmCostTime + 'ms' : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="总耗时" width="100">
+          <template #default="{ row }">
+            {{ row.totalCostTime ? row.totalCostTime + 'ms' : '-' }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">

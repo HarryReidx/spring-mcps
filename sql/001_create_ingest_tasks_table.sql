@@ -36,7 +36,9 @@ CREATE TABLE "public"."ingest_tasks" (
                                          "result_summary" text COLLATE "pg_catalog"."default",
                                          "original_doc_url" text COLLATE "pg_catalog"."default",
                                          "parsed_markdown" text COLLATE "pg_catalog"."default",
-                                         "execution_mode" varchar(20) COLLATE "pg_catalog"."default" DEFAULT 'ASYNC'::character varying
+                                         "execution_mode" varchar(20) COLLATE "pg_catalog"."default" DEFAULT 'ASYNC'::character varying,
+                                         "vlm_cost_time" bigint DEFAULT 0,
+                                         "total_cost_time" bigint DEFAULT 0
 )
 ;
 COMMENT ON COLUMN "public"."ingest_tasks"."id" IS '任务唯一标识';
@@ -45,6 +47,8 @@ COMMENT ON COLUMN "public"."ingest_tasks"."status" IS '任务状态：PENDING-�
 COMMENT ON COLUMN "public"."ingest_tasks"."result_summary" IS '任务结果摘要（JSON 格式的文本）';
 COMMENT ON COLUMN "public"."ingest_tasks"."parsed_markdown" IS '解析后的 Markdown 内容（用于前端预览）';
 COMMENT ON COLUMN "public"."ingest_tasks"."execution_mode" IS '执行模式：SYNC-同步执行, ASYNC-异步执行';
+COMMENT ON COLUMN "public"."ingest_tasks"."vlm_cost_time" IS 'VLM 处理耗时（毫秒）';
+COMMENT ON COLUMN "public"."ingest_tasks"."total_cost_time" IS '总耗时（毫秒）';
 COMMENT ON TABLE "public"."ingest_tasks" IS '文档入库任务表';
 
 -- ----------------------------

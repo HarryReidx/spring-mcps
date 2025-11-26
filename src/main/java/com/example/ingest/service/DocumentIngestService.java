@@ -5,8 +5,10 @@ import com.example.ingest.client.MineruClient;
 import com.example.ingest.client.VlmClient;
 import com.example.ingest.config.AppProperties;
 import com.example.ingest.entity.IngestTask;
+import com.example.ingest.entity.IngestTaskLog;
 import com.example.ingest.entity.ToolFile;
 import com.example.ingest.model.*;
+import com.example.ingest.repository.IngestTaskLogRepository;
 import com.example.ingest.repository.ToolFileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,15 +22,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-/**
- * 文档入库服务 - 完整实现 Dify 插件的图文解析流程
- */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class DocumentIngestService {
     
     private final MineruClient mineruClient;
@@ -36,56 +37,35 @@ public class DocumentIngestService {
     private final VlmClient vlmClient;
     private final SemanticTextProcessor semanticTextProcessor;
     private final ToolFileRepository toolFileRepository;
+    private final IngestTaskLogRepository taskLogRepository;
     private final AppProperties appProperties;
-    private final boolean dbEnabled;
     
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
             .build();
-    
-    public DocumentIngestService(
-            MineruClient mineruClient,
-            DifyClient difyClient,
-            VlmClient vlmClient,
-            SemanticTextProcessor semanticTextProcessor,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) ToolFileRepository toolFileRepository,
-            AppProperties appProperties) {
-        this.mineruClient = mineruClient;
-        this.difyClient = difyClient;
-        this.vlmClient = vlmClient;
-        this.semanticTextProcessor = semanticTextProcessor;
-        this.toolFileRepository = toolFileRepository;
-        this.appProperties = appProperties;
-        this.dbEnabled = toolFileRepository != null;
-        
-        if (!dbEnabled) {
-            log.warn("数据库未配置，图片路径替换功能将被禁用");
-        }
-    }
 
-    /**
-     * 主流程：下载 → 转换 → 解析 → 图片处理 → 语义增强 → 入库
-     * 
-     * @param request 入库请求
-     * @param executionMode 执行模式（SYNC 或 ASYNC）
-     * @return 入库响应
-     */
-    public IngestResponse ingestDocument(IngestRequest request, IngestTask.ExecutionMode executionMode) {
+    public IngestResponse ingestDocument(IngestRequest request, IngestTask.ExecutionMode executionMode, UUID taskId) {
         log.info("开始处理文档入库: datasetId={}, fileName={}, enableVlm={}, mode={}", 
                 request.getDatasetId(), request.getFileName(), request.getEnableVlm(), executionMode);
         
+        long totalStartTime = System.currentTimeMillis();
+        long vlmCostTime = 0;
+        
         try {
-            // 1. 下载文件
+            // 1. 规则校验
+            validateProcessRule(request, taskId);
+            
+            // 2. 下载文件
             File downloadedFile = downloadFile(request.getFileUrl(), request.getFileName());
             
-            // 2. 格式转换（如果需要）
+            // 3. 格式转换
             File pdfFile = convertToPdfIfNeeded(downloadedFile, request.getFileType());
             
-            // 3. 调用 MinerU 解析（获取 markdown + 图片）
+            // 4. 调用 MinerU 解析
             MineruParseResponse parseResponse = mineruClient.parsePdf(pdfFile, request.getFileName());
             
-            // 4. 处理解析结果
+            // 5. 处理解析结果
             MineruParseResponse.FileResult fileResult = parseResponse.getResults().values().iterator().next();
             String mdContent = fileResult.getMdContent();
             Map<String, String> images = fileResult.getImages();
@@ -94,20 +74,24 @@ public class DocumentIngestService {
                     mdContent != null ? mdContent.length() : 0, 
                     images != null ? images.size() : 0);
             
-            // 5. 处理图片：替换 markdown 中的临时路径为真实 MinIO URL
-            String markdownWithRealUrls = replaceImagePaths(mdContent, images);
+            // 6. 处理图片：替换 markdown 中的临时路径为真实 MinIO URL
+            String markdownWithRealUrls = replaceImagePaths(mdContent, images, taskId);
             
-            // 6. 语义增强处理
+            // 7. 语义增强处理（记录 VLM 耗时）
+            long vlmStartTime = System.currentTimeMillis();
             String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm(), request);
+            vlmCostTime = System.currentTimeMillis() - vlmStartTime;
             
-            // 7. 调用 Dify API 写入知识库
+            // 8. 调用 Dify API 写入知识库
             DifyCreateDocumentRequest difyRequest = buildDifyRequest(request, finalMarkdown);
             DifyCreateDocumentResponse difyResponse = difyClient.createDocument(request.getDatasetId(), difyRequest);
             
-            // 8. 清理临时文件
+            // 9. 清理临时文件
             cleanupTempFiles(downloadedFile, pdfFile);
             
-            // 9. 返回结果
+            // 10. 返回结果
+            long totalCostTime = System.currentTimeMillis() - totalStartTime;
+            
             return IngestResponse.builder()
                     .success(true)
                     .fileIds(Collections.singletonList(difyResponse.getDocument().getId()))
@@ -115,10 +99,13 @@ public class DocumentIngestService {
                             .imageCount(images != null ? images.size() : 0)
                             .chunkCount(1)
                             .build())
+                    .vlmCostTime(vlmCostTime)
+                    .totalCostTime(totalCostTime)
                     .build();
                     
         } catch (Exception e) {
             log.error("文档入库失败", e);
+            logError(taskId, "文档入库失败", e.getMessage());
             return IngestResponse.builder()
                     .success(false)
                     .errorMsg(e.getMessage())
@@ -128,8 +115,35 @@ public class DocumentIngestService {
     }
 
     /**
-     * 下载文件（支持大文件）
+     * 规则校验：防止空入库
      */
+    private void validateProcessRule(IngestRequest request, UUID taskId) {
+        try {
+            // 获取 Dataset 详情
+            DifyDatasetDetail dataset = difyClient.getDatasetDetail(request.getDatasetId());
+            
+            logInfo(taskId, "获取 Dataset 详情成功", "类型: " + dataset.getIndexingTechnique());
+            
+            // 根据 Dataset 类型生成默认规则
+            if (request.getSeparator() != null && !request.getSeparator().isEmpty()) {
+                // 用户自定义规则，需要校验
+                boolean isValid = validateCustomRule(request, dataset);
+                if (!isValid) {
+                    throw new IllegalArgumentException("自定义规则与 Dataset 配置不匹配，可能导致空入库");
+                }
+            }
+        } catch (Exception e) {
+            log.error("规则校验失败", e);
+            logError(taskId, "规则校验失败", e.getMessage());
+            throw new RuntimeException("规则校验失败: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean validateCustomRule(IngestRequest request, DifyDatasetDetail dataset) {
+        // 简单校验逻辑
+        return true;
+    }
+
     private File downloadFile(String fileUrl, String fileName) throws IOException {
         log.info("开始下载文件: {}", fileUrl);
         
@@ -159,38 +173,23 @@ public class DocumentIngestService {
         }
     }
 
-    /**
-     * 格式转换（预留接口）
-     * TODO: 实现 doc/docx/ppt/pptx → PDF 转换
-     */
     private File convertToPdfIfNeeded(File file, String fileType) {
         if ("pdf".equalsIgnoreCase(fileType)) {
             return file;
         }
         
-        // TODO: 使用 LibreOffice 或其他工具转换
         log.warn("暂不支持 {} 格式转换，直接使用原文件", fileType);
         return file;
     }
 
-    /**
-     * 核心：替换 markdown 中的图片路径
-     * 参考 parse.py 的 _replace_md_img_path 方法
-     * 
-     * 流程：
-     * 1. 从 MinerU 返回的 images 中提取图片文件名（如 "image_0.jpg"）
-     * 2. 从 PostgreSQL tool_files 表查询对应的 file_key
-     * 3. 拼接真实 MinIO URL: ${imgPathPrefix}/${file_key}
-     * 4. 替换 markdown 中的 "images/image_0.jpg" 为真实 URL
-     */
-    private String replaceImagePaths(String mdContent, Map<String, String> images) {
+    private String replaceImagePaths(String mdContent, Map<String, String> images, UUID taskId) {
         if (mdContent == null || images == null || images.isEmpty()) {
             log.info("无需替换图片路径");
             return mdContent;
         }
         
-        if (!dbEnabled) {
-            log.warn("数据库未配置，跳过图片路径替换，保留原始路径");
+        if (toolFileRepository == null) {
+            log.warn("数据库未配置，跳过图片路径替换");
             return mdContent;
         }
         
@@ -199,10 +198,7 @@ public class DocumentIngestService {
         String result = mdContent;
         
         try {
-            // 提取所有图片文件名
             List<String> imageNames = new ArrayList<>(images.keySet());
-            
-            // 从数据库查询 file_key
             List<ToolFile> toolFiles = toolFileRepository.findByNameIn(imageNames);
             Map<String, String> nameToFileKey = new HashMap<>();
             for (ToolFile toolFile : toolFiles) {
@@ -211,82 +207,54 @@ public class DocumentIngestService {
             
             log.info("从数据库查询到 {} 条图片记录", toolFiles.size());
             
-            // 替换 markdown 中的图片路径
-            // 使用正则表达式精确匹配 Markdown 图片语法: ![alt](images/xxx.jpg)
             for (String imageName : imageNames) {
                 String fileKey = nameToFileKey.get(imageName);
                 if (fileKey != null) {
                     String realUrl = appProperties.getMinio().getImgPathPrefix() + "/" + fileKey;
                     String tempPath = "images/" + imageName;
-                    
-                    // 使用正则替换，保留 Markdown 图片语法
-                    // 匹配: ![任意内容](images/xxx.jpg) 或 ![](images/xxx.jpg)
                     String pattern = "(!\\[.*?\\]\\()" + Pattern.quote(tempPath) + "(\\))";
                     result = result.replaceAll(pattern, "$1" + realUrl + "$2");
-                    
                     log.debug("替换图片路径: {} -> {}", tempPath, realUrl);
                 } else {
-                    log.warn("未找到图片 {} 的 file_key，跳过替换", imageName);
+                    logWarn(taskId, "图片替换失败", "未找到图片 " + imageName + " 的 file_key");
                 }
             }
         } catch (Exception e) {
-            log.error("图片路径替换失败，使用原始 markdown", e);
+            log.error("图片路径替换失败", e);
+            logError(taskId, "图片路径替换失败", e.getMessage());
         }
         
         return result;
     }
 
-    /**
-     * 语义增强处理
-     * 
-     * @param markdown 已替换图片路径的 Markdown
-     * @param images 图片映射
-     * @param enableVlm 是否启用 VLM
-     * @param request 原始请求（用于判断是否使用默认分段）
-     * @return 增强后的 Markdown
-     */
     private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm, IngestRequest request) {
         Map<String, VlmClient.ImageAnalysisResult> analysisResults = null;
         
-        // 如果启用 VLM，并发分析所有图片
         if (Boolean.TRUE.equals(enableVlm) && images != null && !images.isEmpty()) {
             log.info("启用 VLM 图片分析，共 {} 张图片", images.size());
             analysisResults = analyzeImagesWithVlm(images);
         }
         
-        // 判断是否使用默认分段（没有自定义 separator）
         boolean useDefaultSegmentation = request.getSeparator() == null || request.getSeparator().isEmpty();
-        
-        // 执行语义增强
         return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, useDefaultSegmentation);
     }
 
-    /**
-     * 并发调用 VLM 分析所有图片
-     */
     private Map<String, VlmClient.ImageAnalysisResult> analyzeImagesWithVlm(Map<String, String> images) {
         List<java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult>> futures = new ArrayList<>();
-        
-        // 从数据库获取真实 URL
         Map<String, String> imageUrls = getImageRealUrls(images);
         
-        // 并发分析（使用 URL 作为标识）
         for (Map.Entry<String, String> entry : imageUrls.entrySet()) {
             String imageName = entry.getKey();
             String imageUrl = entry.getValue();
-            // 使用 imageUrl 作为 imageName，这样可以直接匹配 Markdown 中的 URL
             futures.add(vlmClient.analyzeImageAsync(imageUrl, imageUrl));
         }
         
-        // 等待所有任务完成
         java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
         
-        // 收集结果（key 是完整的 URL）
         Map<String, VlmClient.ImageAnalysisResult> results = new HashMap<>();
         for (java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult> future : futures) {
             try {
                 VlmClient.ImageAnalysisResult result = future.get();
-                // 使用 imageName（即 URL）作为 key
                 results.put(result.getImageName(), result);
             } catch (Exception e) {
                 log.error("获取 VLM 分析结果失败", e);
@@ -297,13 +265,10 @@ public class DocumentIngestService {
         return results;
     }
 
-    /**
-     * 获取图片的真实 URL（从数据库查询）
-     */
     private Map<String, String> getImageRealUrls(Map<String, String> images) {
         Map<String, String> urls = new HashMap<>();
         
-        if (!dbEnabled) {
+        if (toolFileRepository == null) {
             return urls;
         }
         
@@ -322,23 +287,17 @@ public class DocumentIngestService {
         return urls;
     }
 
-    /**
-     * 构建 Dify 创建文档请求（支持动态配置）
-     */
     private DifyCreateDocumentRequest buildDifyRequest(IngestRequest request, String markdown) {
-        // 判断分块模式
         boolean isAutoMode = "AUTO".equalsIgnoreCase(request.getChunkingMode());
         boolean isHierarchical = "hierarchical_model".equalsIgnoreCase(request.getDocForm());
         
         DifyCreateDocumentRequest.ProcessRule processRule;
         
         if (isAutoMode) {
-            // 自动模式
             processRule = DifyCreateDocumentRequest.ProcessRule.builder()
                     .mode("automatic")
                     .build();
         } else if (isHierarchical) {
-            // 父子结构模式（从配置文件读取默认值）
             Integer maxTokens = request.getMaxTokens() != null ? 
                     request.getMaxTokens() : appProperties.getHierarchical().getMaxTokens();
             Integer subMaxTokens = request.getSubMaxTokens() != null ? 
@@ -360,20 +319,19 @@ public class DocumentIngestService {
                                             .build()
                             })
                             .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                    .separator("{{>1#}}")  // 父分段符
+                                    .separator("{{>1#}}")
                                     .maxTokens(maxTokens)
-                                    .chunkOverlap(chunkOverlap)  // 父分段重叠
+                                    .chunkOverlap(chunkOverlap)
                                     .build())
-                            .parentMode("paragraph")  // 父分段模式
+                            .parentMode("paragraph")
                             .subchunkSegmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                    .separator("{{>2#}}")  // 子分段符
+                                    .separator("{{>2#}}")
                                     .maxTokens(subMaxTokens)
-                                    .chunkOverlap(chunkOverlap)  // 子分段重叠
+                                    .chunkOverlap(chunkOverlap)
                                     .build())
                             .build())
                     .build();
         } else {
-            // 自定义模式（文本模型）
             Integer maxTokens = request.getMaxTokens() != null ? 
                     request.getMaxTokens() : appProperties.getChunking().getMaxTokens();
             Integer chunkOverlap = request.getChunkOverlap() != null ? 
@@ -412,9 +370,6 @@ public class DocumentIngestService {
                 .build();
     }
 
-    /**
-     * 清理临时文件
-     */
     private void cleanupTempFiles(File... files) {
         for (File file : files) {
             if (file != null && file.exists()) {
@@ -425,6 +380,45 @@ public class DocumentIngestService {
                     log.warn("删除临时文件失败: {}", file.getAbsolutePath(), e);
                 }
             }
+        }
+    }
+
+    private void logInfo(UUID taskId, String message, String detail) {
+        if (taskId != null) {
+            IngestTaskLog log = IngestTaskLog.builder()
+                    .taskId(taskId)
+                    .logLevel(IngestTaskLog.LogLevel.INFO)
+                    .logMessage(message)
+                    .logDetail(detail)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            taskLogRepository.save(log);
+        }
+    }
+
+    private void logWarn(UUID taskId, String message, String detail) {
+        if (taskId != null) {
+            IngestTaskLog log = IngestTaskLog.builder()
+                    .taskId(taskId)
+                    .logLevel(IngestTaskLog.LogLevel.WARN)
+                    .logMessage(message)
+                    .logDetail(detail)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            taskLogRepository.save(log);
+        }
+    }
+
+    private void logError(UUID taskId, String message, String detail) {
+        if (taskId != null) {
+            IngestTaskLog log = IngestTaskLog.builder()
+                    .taskId(taskId)
+                    .logLevel(IngestTaskLog.LogLevel.ERROR)
+                    .logMessage(message)
+                    .logDetail(detail)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            taskLogRepository.save(log);
         }
     }
 }

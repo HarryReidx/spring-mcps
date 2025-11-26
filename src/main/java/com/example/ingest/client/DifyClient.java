@@ -4,6 +4,7 @@ import com.example.ingest.config.AppProperties;
 import com.example.ingest.exception.DifyException;
 import com.example.ingest.model.DifyCreateDocumentRequest;
 import com.example.ingest.model.DifyCreateDocumentResponse;
+import com.example.ingest.model.DifyDatasetDetail;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,41 @@ public class DifyClient {
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .build();
+    }
+
+    /**
+     * 获取 Dataset 详情
+     */
+    public DifyDatasetDetail getDatasetDetail(String datasetId) {
+        log.info("获取 Dataset 详情: datasetId={}", datasetId);
+        
+        String url = String.format("%s/datasets/%s", 
+                appProperties.getDify().getBaseUrl(), datasetId);
+        
+        try {
+            Request httpRequest = new Request.Builder()
+                    .url(url)
+                    .get()
+                    .addHeader("Authorization", "Bearer " + appProperties.getDify().getApiKey())
+                    .build();
+            
+            try (Response response = getHttpClient().newCall(httpRequest).execute()) {
+                if (!response.isSuccessful()) {
+                    String errorBody = response.body() != null ? response.body().string() : "Unknown error";
+                    log.error("获取 Dataset 详情失败: status={}, body={}", response.code(), errorBody);
+                    throw new DifyException("获取 Dataset 详情失败: " + errorBody);
+                }
+                
+                String responseBody = response.body().string();
+                log.debug("Dataset 详情响应: {}", responseBody);
+                
+                return objectMapper.readValue(responseBody, DifyDatasetDetail.class);
+            }
+            
+        } catch (IOException e) {
+            log.error("获取 Dataset 详情失败", e);
+            throw new DifyException("获取 Dataset 详情失败: " + e.getMessage(), e);
+        }
     }
 
     /**

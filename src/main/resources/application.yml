@@ -3,7 +3,7 @@ spring:
   application:
     name: dify-ingest
   
-  # 数据库配置（可选，用于图片路径替换）
+  # 数据库配置
   datasource:
     url: jdbc:postgresql://172.24.0.5:5432/dify
     username: postgres
@@ -56,10 +56,10 @@ app:
   
   # VLM 视觉模型配置
   vlm:
-    provider: ${VLM_PROVIDER:}                                             # 提供商: openai, ollama（可选，自动检测）
-    base-url: ${VLM_BASE_URL:http://172.24.0.5:11434/api/chat}             # VLM API 地址（Ollama: /api/chat）
-    api-key: ${VLM_API_KEY:}                                               # VLM API 密钥（Ollama 不需要）
-    model: ${VLM_MODEL:qwen2.5vl:7b}                                       # 模型名称
+    provider: ${VLM_PROVIDER:qwen}                                         # 提供商: openai, qwen, modelverse
+    base-url: ${VLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}  # VLM API 地址
+    api-key: ${VLM_API_KEY:}                                               # VLM API 密钥
+    model: ${VLM_MODEL:qwen-vl-max-latest}                                 # 模型名称
     max-tokens: 10000                                                      # 最大 token 数
     prompt: "请简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: （简要描述） OCR: （关键文字）"
 

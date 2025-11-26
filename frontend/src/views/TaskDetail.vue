@@ -36,8 +36,11 @@
           <el-descriptions-item label="结束时间">
             {{ formatTime(task.endTime) }}
           </el-descriptions-item>
-          <el-descriptions-item label="耗时">
-            {{ getDuration(task) }}
+          <el-descriptions-item label="VLM 耗时">
+            {{ task.vlmCostTime ? task.vlmCostTime + 'ms' : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="总耗时">
+            {{ task.totalCostTime ? task.totalCostTime + 'ms' : '-' }}
           </el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -86,6 +89,36 @@
         </div>
       </el-card>
       
+      <!-- 执行日志 -->
+      <el-card class="logs-card">
+        <template #header>
+          <div class="logs-header">
+            <span>执行日志</span>
+            <el-button size="small" @click="loadLogs">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
+        </template>
+        <el-table :data="logs" stripe style="width: 100%">
+          <el-table-column prop="logLevel" label="级别" width="80">
+            <template #default="{ row }">
+              <el-tag :type="getLogLevelType(row.logLevel)" size="small">
+                {{ row.logLevel }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="logMessage" label="消息" />
+          <el-table-column prop="logDetail" label="详情" show-overflow-tooltip />
+          <el-table-column prop="createdAt" label="时间" width="180">
+            <template #default="{ row }">
+              {{ formatTime(row.createdAt) }}
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="logs.length === 0" description="暂无日志" />
+      </el-card>
+      
       <!-- 原始文档链接 -->
       <el-card v-if="task.fileUrl" class="link-card">
         <template #header>
@@ -115,6 +148,7 @@ hljs.registerLanguage('markdown', markdown)
 
 const route = useRoute()
 const task = ref(null)
+const logs = ref([])
 
 const loadTask = async () => {
   try {
@@ -122,6 +156,15 @@ const loadTask = async () => {
     task.value = data
   } catch (error) {
     ElMessage.error('加载任务详情失败')
+  }
+}
+
+const loadLogs = async () => {
+  try {
+    const { data } = await taskApi.getTaskLogs(route.params.id)
+    logs.value = data
+  } catch (error) {
+    ElMessage.error('加载日志失败')
   }
 }
 
@@ -179,8 +222,18 @@ const getDuration = (task) => {
   return `${seconds}s`
 }
 
+const getLogLevelType = (level) => {
+  const map = {
+    INFO: 'info',
+    WARN: 'warning',
+    ERROR: 'danger'
+  }
+  return map[level] || 'info'
+}
+
 onMounted(() => {
   loadTask()
+  loadLogs()
 })
 </script>
 
@@ -203,8 +256,15 @@ onMounted(() => {
 .result-card,
 .error-card,
 .markdown-card,
+.logs-card,
 .link-card {
   margin-bottom: 20px;
+}
+
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .markdown-header {
