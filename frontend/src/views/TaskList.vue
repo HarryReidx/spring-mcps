@@ -30,13 +30,25 @@
             <el-icon><Refresh /></el-icon>
             重置
           </el-button>
+          <el-button 
+            type="danger" 
+            :disabled="selectedTasks.length === 0"
+            @click="handleBatchDelete">
+            <el-icon><Delete /></el-icon>
+            批量删除 ({{ selectedTasks.length }})
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
     
     <!-- 任务表格 -->
     <el-card class="table-card">
-      <el-table :data="tasks" v-loading="loading" stripe>
+      <el-table 
+        :data="tasks" 
+        v-loading="loading" 
+        stripe
+        @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="fileName" label="文件名" min-width="200" />
         <el-table-column prop="datasetId" label="知识库 ID" width="180" />
         <el-table-column prop="status" label="状态" width="100">
@@ -103,11 +115,12 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { taskApi } from '../api/task'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const loading = ref(false)
 const tasks = ref([])
+const selectedTasks = ref([])
 const filters = ref({ status: '', mode: '' })
 const pagination = ref({
   page: 1,
@@ -137,6 +150,43 @@ const resetFilters = () => {
   filters.value = { status: '', mode: '' }
   pagination.value.page = 1
   loadTasks()
+}
+
+const handleSelectionChange = (selection) => {
+  selectedTasks.value = selection
+}
+
+const handleBatchDelete = async () => {
+  if (selectedTasks.value.length === 0) {
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedTasks.value.length} 个任务吗？`,
+      '批量删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    const taskIds = selectedTasks.value.map(task => task.id)
+    const { data } = await taskApi.deleteTasks(taskIds)
+    
+    if (data.success) {
+      ElMessage.success(data.message)
+      selectedTasks.value = []
+      loadTasks()
+    } else {
+      ElMessage.error(data.message || '删除失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
 }
 
 const viewDetail = (taskId) => {

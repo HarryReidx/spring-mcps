@@ -34,9 +34,10 @@
 - **层级模型（hierarchical_model）**：父子结构分段，支持自定义父子分段 token 数
 
 ### 任务管理
-- **同步入库**：立即返回结果，适合小文件
-- **异步任务**：后台处理，支持状态跟踪和进度查询
+- **同步入库**：`POST /ingest/sync` - 阻塞等待，立即返回结果，适合小文件
+- **异步任务**：`POST /ingest/async` - 后台处理，支持状态跟踪和进度查询
 - **任务监控**：完整的任务管理系统，记录执行详情和结果
+- **执行日志**：记录任务执行过程中的 INFO/WARN/ERROR 日志，支持前端查看
 
 ### Dify 入库
 - 调用 Dify API 将处理后的文档写入知识库
@@ -56,6 +57,7 @@
 - ✅ VLM 视觉理解（图片分析）
   - ✅ OpenAI GPT-4o 支持
   - ✅ Qwen 通义千问支持
+  - ✅ ModelVerse 优云智算支持
   - ✅ Ollama 本地部署支持
 - ✅ 标题上下文注入
 - ✅ 图片描述增强
@@ -72,12 +74,13 @@
 - ✅ 自动检测分段策略
 
 ### 任务管理
-- ✅ 同步入库（立即返回结果）
-- ✅ 异步任务（后台处理）
+- ✅ 同步入库（`POST /ingest/sync` - 阻塞等待，立即返回结果）
+- ✅ 异步任务（`POST /ingest/async` - 后台处理）
 - ✅ 任务状态跟踪（PENDING/PROCESSING/COMPLETED/FAILED）
 - ✅ 执行模式标识（SYNC/ASYNC）
 - ✅ 详细执行报告
 - ✅ 错误信息记录
+- ✅ 执行日志系统（INFO/WARN/ERROR 级别）
 - ✅ Markdown 内容存储
 - ✅ 任务列表查询（分页、筛选）
 - ✅ 统计信息查询
@@ -85,8 +88,10 @@
 ### 前端监控
 - ✅ Vue 3 + Element Plus
 - ✅ 统计概览页（总任务数、成功率、平均耗时）
-- ✅ 任务列表页（分页、状态筛选）
+- ✅ 任务列表页（分页、状态筛选、执行模式筛选）
 - ✅ 任务详情页（Markdown 预览、语法高亮）
+- ✅ 执行日志面板（实时查看任务日志，支持日志级别标识）
+- ✅ VLM 耗时显示（修复数字显示问题）
 - ✅ 一键复制功能
 - ✅ 响应式设计
 
@@ -101,9 +106,10 @@
 - ✅ Actuator 监控端点
 
 ### API 接口
-- ✅ 同步文档入库接口
-- ✅ 异步任务创建接口
+- ✅ 同步文档入库接口（`POST /ingest/sync`）
+- ✅ 异步任务创建接口（`POST /ingest/async`）
 - ✅ 任务详情查询接口
+- ✅ 任务日志查询接口（`GET /task/{id}/logs`）
 - ✅ 任务列表查询接口
 - ✅ 统计信息查询接口
 - ✅ 健康检查接口
@@ -111,6 +117,7 @@
 ### 数据库
 - ✅ PostgreSQL 支持
 - ✅ 任务表（ingest_tasks）
+- ✅ 任务日志表（ingest_task_logs）
 - ✅ 图片文件表（tool_files）
 - ✅ 自动更新时间戳
 - ✅ 索引优化
@@ -201,8 +208,10 @@ app:
   
   # VLM 视觉模型配置
   vlm:
-    base-url: http://172.24.0.5:11434/api/chat
-    model: qwen2.5vl:7b
+    provider: qwen                                                         # 提供商: openai, qwen, modelverse
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1           # VLM API 地址
+    api-key: ${VLM_API_KEY:}                                               # VLM API 密钥
+    model: qwen-vl-max-latest                                              # 模型名称
     max-tokens: 10000
 ```
 
@@ -217,19 +226,23 @@ export DIFY_BASE_URL=http://your-host/v1
 export MINERU_BASE_URL=http://your-host:8000
 
 # VLM 配置（可选，仅在启用 VLM 时需要）
-# 使用 Ollama（本地部署，推荐）
-export VLM_BASE_URL=http://localhost:11434/api/chat
-export VLM_MODEL=qwen2.5vl:7b
+# 使用 Qwen（推荐）
+export VLM_PROVIDER=qwen
+export VLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export VLM_API_KEY=sk-xxx
+export VLM_MODEL=qwen-vl-max-latest
+
+# 或使用 ModelVerse（优云智算）
+export VLM_PROVIDER=modelverse
+export VLM_BASE_URL=https://api.modelverse.cn/v1
+export VLM_API_KEY=your-key
+export VLM_MODEL=qwen-vl-max
 
 # 或使用 OpenAI
-export VLM_BASE_URL=https://api.openai.com/v1/chat/completions
+export VLM_PROVIDER=openai
+export VLM_BASE_URL=https://api.openai.com/v1
 export VLM_API_KEY=sk-xxx
 export VLM_MODEL=gpt-4o
-
-# 或使用 Qwen
-export VLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
-export VLM_API_KEY=sk-xxx
-export VLM_MODEL=qwen-vl-max
 ```
 
 ### 配置优先级
@@ -243,8 +256,7 @@ export VLM_MODEL=qwen-vl-max
 ### 1. 数据库初始化
 ```bash
 psql -U postgres -d dify -f sql/001_create_ingest_tasks_table.sql
-psql -U postgres -d dify -f sql/002_add_execution_mode.sql
-psql -U postgres -d dify -f sql/004_change_jsonb_to_text.sql
+psql -U postgres -d dify -f sql/002_create_ingest_task_logs_table.sql
 ```
 
 ### 2. 启动后端
@@ -274,13 +286,13 @@ curl http://localhost:8080/api/dify/tasks/stats
 
 ## API 接口
 
-### 1. 同步文档入库
+### 1. 同步文档入库（阻塞等待）
 
 ```http
-POST /api/dify/document/ingest
+POST /api/dify/document/ingest/sync
 ```
 
-立即返回结果，适合小文件。
+阻塞等待，立即返回最终结果，适合小文件。
 
 **请求体**：
 ```json
@@ -289,50 +301,71 @@ POST /api/dify/document/ingest
   "fileUrl": "http://xxx/file.pdf",
   "fileName": "file.pdf",
   "fileType": "pdf",
-  "docForm": "hierarchical_model",      // 文档形式: text_model | hierarchical_model
+  "chunkingMode": "AUTO",               // 分块模式: AUTO（自动）| CUSTOM（自定义）
   "enableVlm": true,                    // 是否启用 VLM 图片理解
-  "maxTokens": 1024,                    // 父分段最大 token 数
-  "subMaxTokens": 512,                  // 子分段最大 token 数
-  "chunkOverlap": 50,                   // 分段重叠 token 数
-  "indexingTechnique": "high_quality"   // 索引技术
+  "maxTokens": 1024,                    // CUSTOM 模式：父分段最大 token 数
+  "subMaxTokens": 512,                  // CUSTOM 模式：子分段最大 token 数
+  "chunkOverlap": 50,                   // CUSTOM 模式：分段重叠 token 数
+  "separator": "\\n"                    // CUSTOM 模式：分隔符
 }
 ```
 
-**响应**：
+**响应（成功）**：
 ```json
 {
   "success": true,
+  "taskId": "uuid",
+  "status": "COMPLETED",
   "fileIds": ["doc-id-xxx"],
   "stats": {
     "imageCount": 5,
     "chunkCount": 10
-  }
+  },
+  "vlmCostTime": 5000,
+  "totalCostTime": 30000
 }
 ```
 
-### 2. 创建异步任务
-
-```http
-POST /api/dify/tasks
+**响应（失败）**：
+```json
+{
+  "success": false,
+  "taskId": "uuid",
+  "status": "FAILED",
+  "errorMsg": "错误信息"
+}
 ```
 
-后台处理，返回任务 ID，适合大文件。
+### 2. 异步文档入库（后台处理）
+
+```http
+POST /api/dify/document/ingest/async
+```
+
+立即返回任务 ID，后台处理，适合大文件。
 
 **请求体**：同上
 
 **响应**：
 ```json
 {
-  "success": true,
   "taskId": "uuid",
-  "message": "任务已创建，正在后台处理"
+  "status": "PENDING"
 }
 ```
 
-### 3. 查询任务详情
+### 3. 文档入库（兼容旧接口）
 
 ```http
-GET /api/dify/tasks/{taskId}
+POST /api/dify/document/ingest
+```
+
+默认异步模式，等同于 `/ingest/async`。
+
+### 4. 查询任务详情
+
+```http
+GET /api/dify/document/task/{taskId}
 ```
 
 **响应**：
@@ -341,38 +374,87 @@ GET /api/dify/tasks/{taskId}
   "id": "uuid",
   "datasetId": "xxx",
   "fileName": "test.pdf",
+  "fileUrl": "http://xxx/test.pdf",
+  "fileType": "pdf",
   "status": "COMPLETED",
   "executionMode": "ASYNC",
   "enableVlm": true,
-  "startTime": "2025-11-25T10:00:00",
-  "endTime": "2025-11-25T10:05:00",
-  "resultSummary": "{\"imageCount\":5,\"chunkCount\":10}",
-  "parsedMarkdown": "# 标题\n内容..."
+  "startTime": "2025-11-26T10:00:00",
+  "endTime": "2025-11-26T10:05:00",
+  "createdAt": "2025-11-26T09:55:00",
+  "updatedAt": "2025-11-26T10:05:00",
+  "vlmCostTime": 5000,
+  "totalCostTime": 30000,
+  "resultSummary": "{\"imageCount\":5,\"chunkCount\":10,\"fileIds\":[\"doc-xxx\"]}",
+  "parsedMarkdown": "# 标题\n内容...",
+  "errorMsg": null
 }
 ```
 
-### 4. 查询任务列表
+### 5. 查询任务日志
 
 ```http
-GET /api/dify/tasks?page=0&size=20&status=COMPLETED&mode=SYNC
+GET /api/dify/document/task/{taskId}/logs
+```
+
+**响应**：
+```json
+[
+  {
+    "id": "uuid",
+    "taskId": "uuid",
+    "logLevel": "INFO",
+    "logMessage": "开始处理文档",
+    "logDetail": "indexingTechnique=high_quality, docForm=hierarchical_model",
+    "createdAt": "2025-11-26T10:00:00"
+  },
+  {
+    "id": "uuid",
+    "taskId": "uuid",
+    "logLevel": "WARN",
+    "logMessage": "图片替换失败",
+    "logDetail": "未找到图片 image1.png 的 file_key",
+    "createdAt": "2025-11-26T10:00:05"
+  }
+]
+```
+
+### 6. 查询任务列表
+
+```http
+GET /api/dify/tasks?page=0&size=20&status=COMPLETED&mode=ASYNC
 ```
 
 **参数**：
-- `page` - 页码（从 0 开始）
-- `size` - 每页数量
-- `status` - 状态筛选（PENDING, PROCESSING, COMPLETED, FAILED）
-- `mode` - 执行模式筛选（SYNC, ASYNC）
+- `page` - 页码（从 0 开始，默认 0）
+- `size` - 每页数量（默认 20）
+- `status` - 状态筛选（可选：PENDING, PROCESSING, COMPLETED, FAILED）
+- `mode` - 执行模式筛选（可选：SYNC, ASYNC）
 
 **响应**：
 ```json
 {
-  "content": [...],
+  "content": [
+    {
+      "id": "uuid",
+      "datasetId": "xxx",
+      "fileName": "test.pdf",
+      "status": "COMPLETED",
+      "executionMode": "ASYNC",
+      "enableVlm": true,
+      "vlmCostTime": 5000,
+      "totalCostTime": 30000,
+      "createdAt": "2025-11-26T10:00:00"
+    }
+  ],
   "totalElements": 100,
-  "totalPages": 5
+  "totalPages": 5,
+  "size": 20,
+  "number": 0
 }
 ```
 
-### 5. 获取统计信息
+### 7. 获取统计信息
 
 ```http
 GET /api/dify/tasks/stats
@@ -390,13 +472,79 @@ GET /api/dify/tasks/stats
 }
 ```
 
-### 6. 健康检查
+### 8. 健康检查
 
 ```http
 GET /api/dify/document/health
 ```
 
 **响应**：`OK`
+
+---
+
+## 接口使用示例
+
+### 示例 1：同步入库（AUTO 模式）
+
+```bash
+curl -X POST http://localhost:8080/api/dify/document/ingest/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "datasetId": "your-dataset-id",
+    "fileUrl": "http://example.com/document.pdf",
+    "fileName": "document.pdf",
+    "fileType": "pdf",
+    "chunkingMode": "AUTO",
+    "enableVlm": true
+  }'
+```
+
+### 示例 2：异步入库（CUSTOM 模式）
+
+```bash
+curl -X POST http://localhost:8080/api/dify/document/ingest/async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "datasetId": "your-dataset-id",
+    "fileUrl": "http://example.com/document.pdf",
+    "fileName": "document.pdf",
+    "fileType": "pdf",
+    "chunkingMode": "CUSTOM",
+    "separator": "\\n\\n",
+    "maxTokens": 800,
+    "chunkOverlap": 100,
+    "enableVlm": false
+  }'
+```
+
+### 示例 3：查询任务状态
+
+```bash
+# 查询任务详情
+curl http://localhost:8080/api/dify/document/task/{taskId}
+
+# 查询任务日志
+curl http://localhost:8080/api/dify/document/task/{taskId}/logs
+```
+
+### 示例 4：查询任务列表
+
+```bash
+# 查询所有任务
+curl http://localhost:8080/api/dify/tasks?page=0&size=20
+
+# 查询已完成的任务
+curl http://localhost:8080/api/dify/tasks?status=COMPLETED
+
+# 查询同步模式的任务
+curl http://localhost:8080/api/dify/tasks?mode=SYNC
+```
+
+### 示例 5：获取统计信息
+
+```bash
+curl http://localhost:8080/api/dify/tasks/stats
+```
 
 ## 文档导航
 
@@ -478,8 +626,7 @@ chmod +x test-api.sh
 #### 1. 数据库初始化
 ```bash
 psql -U postgres -d dify -f sql/001_create_ingest_tasks_table.sql
-psql -U postgres -d dify -f sql/002_add_execution_mode.sql
-psql -U postgres -d dify -f sql/004_change_jsonb_to_text.sql
+psql -U postgres -d dify -f sql/002_create_ingest_task_logs_table.sql
 ```
 
 #### 2. 启动后端
@@ -520,10 +667,10 @@ tail -f logs/spring.log
 
 ## 使用示例
 
-### 同步入库（立即返回）
+### 同步入库（阻塞等待，立即返回结果）
 
 ```bash
-curl -X POST http://localhost:8080/api/dify/document/ingest \
+curl -X POST http://localhost:8080/api/dify/document/ingest/sync \
   -H "Content-Type: application/json" \
   -d '{
     "datasetId": "your-dataset-id",
@@ -538,11 +685,11 @@ curl -X POST http://localhost:8080/api/dify/document/ingest \
   }'
 ```
 
-### 异步任务（后台处理）
+### 异步任务（后台处理，立即返回任务 ID）
 
 ```bash
 # 创建任务
-curl -X POST http://localhost:8080/api/dify/tasks \
+curl -X POST http://localhost:8080/api/dify/document/ingest/async \
   -H "Content-Type: application/json" \
   -d '{
     "datasetId": "your-dataset-id",
@@ -554,7 +701,10 @@ curl -X POST http://localhost:8080/api/dify/tasks \
   }'
 
 # 查询任务状态
-curl http://localhost:8080/api/dify/tasks/{taskId}
+curl http://localhost:8080/api/dify/document/task/{taskId}
+
+# 查询任务日志
+curl http://localhost:8080/api/dify/document/task/{taskId}/logs
 
 # 查看统计信息
 curl http://localhost:8080/api/dify/tasks/stats
@@ -567,8 +717,8 @@ curl http://localhost:8080/api/dify/tasks/stats
 ### 功能特性
 
 - **统计概览**：总任务数、成功率、各状态任务数
-- **任务列表**：分页查询、状态筛选、快速跳转
-- **任务详情**：基本信息、结果摘要、Markdown 预览（语法高亮）
+- **任务列表**：分页查询、状态筛选、执行模式筛选、快速跳转
+- **任务详情**：基本信息、结果摘要、Markdown 预览（语法高亮）、执行日志面板
 
 ### 快速启动
 

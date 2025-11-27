@@ -5,6 +5,8 @@ import lombok.Data;
 /**
  * 文档入库请求
  * 由 Dify HTTP 插件调用
+ * 
+ * @author HarryReid(黄药师)
  */
 @Data
 public class IngestRequest {
@@ -22,13 +24,13 @@ public class IngestRequest {
     
     // ========== RAG 配置参数 ==========
     
-    /** 分块模式: AUTO, CUSTOM */
+    /** 分块模式: AUTO（自动根据知识库类型匹配）, CUSTOM（自定义规则） */
     private String chunkingMode = "AUTO";
     
     /** 最大 token 数（CUSTOM 模式下生效，父子结构为父分段 token 数） */
     private Integer maxTokens;
     
-    /** 子分段最大 token 数（父子结构模式下生效） */
+    /** 子分段最大 token 数（CUSTOM 模式 + 父子结构下生效） */
     private Integer subMaxTokens;
     
     /** 分块重叠（CUSTOM 模式下生效） */
@@ -40,9 +42,6 @@ public class IngestRequest {
     /** 是否启用 VLM 图片理解 */
     private Boolean enableVlm = false;
     
-    /** 索引技术: high_quality, economy */
-    private String indexingTechnique = "high_quality";
-    
-    /** 文档形式: text_model, hierarchical_model */
-    private String docForm = "hierarchical_model";  // 默认使用父子结构
+    /** 索引技术: high_quality, economy（从 Dataset 自动获取，无需传入） */
+    private String indexingTechnique;
 }

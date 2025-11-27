@@ -42,24 +42,33 @@ app:
   minio:
     img-path-prefix: ${MINIO_IMG_PREFIX:http://172.24.0.5:9000/ty-ai-flow}  # 图片路径前缀
   
-  # 文档分段配置
-  chunking:
-    separator: "\n"      # 分段分隔符（文本模型）
-    max-tokens: 1000     # 最大 token 数（文本模型）
-    chunk-overlap: 50    # 分段重叠（文本模型）
-  
-  # 父子分段配置
-  hierarchical:
-    max-tokens: 1024         # 父分段最大 token 数
-    sub-max-tokens: 512      # 子分段最大 token 数
-    chunk-overlap: 50        # 分段重叠 token 数
+  # 文档分段规则配置（AUTO 模式下根据知识库类型自动匹配）
+  process-rule:
+    # 文本模型配置
+    text-model:
+      separator: "\n"           # 分段分隔符
+      max-tokens: 1000          # 最大 token 数
+      chunk-overlap: 50         # 分段重叠
+    
+    # 层级模型（父子结构）配置
+    hierarchical-model:
+      separator: "{{>1#}}"      # 父分段分隔符
+      max-tokens: 1024          # 父分段最大 token 数
+      sub-separator: "{{>2#}}"  # 子分段分隔符
+      sub-max-tokens: 512       # 子分段最大 token 数
+      chunk-overlap: 50         # 分段重叠 token 数
+      parent-mode: paragraph    # 父分段模式
+    
+    # Q&A 模型配置
+    qa-model:
+      enabled: false            # 是否启用
   
   # VLM 视觉模型配置
   vlm:
-    provider: ${VLM_PROVIDER:qwen}                                         # 提供商: openai, qwen, modelverse
-    base-url: ${VLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}  # VLM API 地址
-    api-key: ${VLM_API_KEY:}                                               # VLM API 密钥
-    model: ${VLM_MODEL:qwen-vl-max-latest}                                 # 模型名称
+    provider: ${VLM_PROVIDER:ollama}                                       # 提供商: openai, qwen, modelverse, ollama
+    base-url: ${VLM_BASE_URL:http://172.24.0.5:11434/api/chat}            # VLM API 地址
+    api-key: ${VLM_API_KEY:}                                               # VLM API 密钥（Ollama 不需要）
+    model: ${VLM_MODEL:qwen2.5vl:7b}                                       # 模型名称
     max-tokens: 10000                                                      # 最大 token 数
     prompt: "请简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: （简要描述） OCR: （关键文字）"
 

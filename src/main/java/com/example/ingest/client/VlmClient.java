@@ -17,7 +17,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * VLM (Vision Language Model) 客户端
  * 用于图片语义理解和 OCR 提取
- * 支持 OpenAI 和 Ollama 两种模式
+ * 支持 OpenAI、Qwen、ModelVerse 等多种提供商
+ * 
+ * @author HarryReid(黄药师)
  */
 @Slf4j
 @Component
@@ -30,7 +32,8 @@ public class VlmClient {
     private enum VlmProvider {
         OPENAI,
         QWEN,
-        MODELVERSE
+        MODELVERSE,
+        OLLAMA
     }
     
     private OkHttpClient getHttpClient() {
@@ -66,6 +69,10 @@ public class VlmClient {
 
     /**
      * 同步分析图片
+     * 
+     * @param imageUrl 图片 URL
+     * @param imageName 图片名称
+     * @return 分析结果
      */
     private ImageAnalysisResult analyzeImage(String imageUrl, String imageName) throws IOException {
         long startTime = System.currentTimeMillis();
@@ -76,10 +83,15 @@ public class VlmClient {
         
         log.debug("检测到 VLM 提供商: {}", provider);
         
-        // 所有提供商都使用 URL 模式（OpenAI 兼容）
-        String imageData = imageUrl;
+        // Ollama 需要 base64，其他使用 URL
+        String imageData;
+        if (provider == VlmProvider.OLLAMA) {
+            imageData = downloadAndEncodeImage(imageUrl);
+        } else {
+            imageData = imageUrl;
+        }
         
-        // 构建请求体（根据提供商类型）
+        // 构建请求体
         String requestBody = buildVisionRequest(imageData, vlmConfig.getPrompt(), provider);
         
         // 构建请求
@@ -165,43 +177,91 @@ public class VlmClient {
                 case "qwen": return VlmProvider.QWEN;
                 case "modelverse": return VlmProvider.MODELVERSE;
                 case "openai": return VlmProvider.OPENAI;
+                case "ollama": return VlmProvider.OLLAMA;
             }
         }
         // 自动检测
         if (baseUrl.contains("dashscope.aliyuncs.com")) return VlmProvider.QWEN;
         if (baseUrl.contains("modelverse.cn")) return VlmProvider.MODELVERSE;
-        return VlmProvider.OPENAI;
+        if (baseUrl.contains("11434") || baseUrl.contains("ollama")) return VlmProvider.OLLAMA;
+        // 默认 Ollama
+        return VlmProvider.OLLAMA;
     }
 
     /**
-     * 解析响应（OpenAI 兼容格式）
+     * 解析响应
      */
     private String parseResponse(String responseBody, VlmProvider provider) throws IOException {
         JsonNode root = objectMapper.readTree(responseBody);
-        // 所有提供商都使用 OpenAI 兼容格式
-        return root.path("choices").get(0).path("message").path("content").asText();
+        
+        if (provider == VlmProvider.OLLAMA) {
+            // Ollama 格式: {"message": {"content": "..."}}
+            JsonNode message = root.path("message");
+            if (message.isMissingNode()) {
+                throw new IOException("Ollama 响应缺少 message 字段");
+            }
+            JsonNode content = message.path("content");
+            if (content.isMissingNode()) {
+                throw new IOException("Ollama 响应缺少 content 字段");
+            }
+            return content.asText();
+        } else {
+            // OpenAI 兼容格式: {"choices": [{"message": {"content": "..."}}]}
+            JsonNode choices = root.path("choices");
+            if (choices.isMissingNode() || !choices.isArray() || choices.size() == 0) {
+                throw new IOException("响应缺少 choices 字段或为空");
+            }
+            JsonNode firstChoice = choices.get(0);
+            if (firstChoice == null) {
+                throw new IOException("choices[0] 为空");
+            }
+            JsonNode message = firstChoice.path("message");
+            if (message.isMissingNode()) {
+                throw new IOException("响应缺少 message 字段");
+            }
+            JsonNode content = message.path("content");
+            if (content.isMissingNode()) {
+                throw new IOException("响应缺少 content 字段");
+            }
+            return content.asText();
+        }
     }
 
     /**
-     * 构建 Vision API 请求体（OpenAI 兼容格式）
+     * 构建 Vision API 请求体
      */
     private String buildVisionRequest(String imageData, String prompt, VlmProvider provider) throws IOException {
-        // 所有提供商都使用 OpenAI 兼容格式
-        Map<String, Object> requestMap = Map.of(
-                "model", appProperties.getVlm().getModel(),
-                "messages", List.of(
-                        Map.of(
-                                "role", "user",
-                                "content", List.of(
-                                        Map.of("type", "text", "text", prompt),
-                                        Map.of("type", "image_url", "image_url", Map.of("url", imageData))
-                                )
-                        )
-                ),
-                "max_tokens", appProperties.getVlm().getMaxTokens()
-        );
-        
-        return objectMapper.writeValueAsString(requestMap);
+        if (provider == VlmProvider.OLLAMA) {
+            // Ollama 格式
+            Map<String, Object> requestMap = Map.of(
+                    "model", appProperties.getVlm().getModel(),
+                    "messages", List.of(
+                            Map.of(
+                                    "role", "user",
+                                    "content", prompt,
+                                    "images", List.of(imageData)
+                            )
+                    ),
+                    "stream", false
+            );
+            return objectMapper.writeValueAsString(requestMap);
+        } else {
+            // OpenAI 兼容格式（OpenAI, Qwen, ModelVerse）
+            Map<String, Object> requestMap = Map.of(
+                    "model", appProperties.getVlm().getModel(),
+                    "messages", List.of(
+                            Map.of(
+                                    "role", "user",
+                                    "content", List.of(
+                                            Map.of("type", "text", "text", prompt),
+                                            Map.of("type", "image_url", "image_url", Map.of("url", imageData))
+                                    )
+                            )
+                    ),
+                    "max_tokens", appProperties.getVlm().getMaxTokens()
+            );
+            return objectMapper.writeValueAsString(requestMap);
+        }
     }
 
     /**

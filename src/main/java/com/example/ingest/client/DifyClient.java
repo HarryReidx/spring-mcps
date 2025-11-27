@@ -16,6 +16,9 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Dify API 客户端
+ * 负责与 Dify 平台交互
+ * 
+ * @author HarryReid(黄药师)
  */
 @Slf4j
 @Component
@@ -34,6 +37,9 @@ public class DifyClient {
 
     /**
      * 获取 Dataset 详情
+     * 
+     * @param datasetId Dataset ID
+     * @return Dataset 详情
      */
     public DifyDatasetDetail getDatasetDetail(String datasetId) {
         log.info("获取 Dataset 详情: datasetId={}", datasetId);
@@ -69,6 +75,10 @@ public class DifyClient {
 
     /**
      * 调用 Dify API 创建文档（写入知识库）
+     * 
+     * @param datasetId Dataset ID
+     * @param request 创建文档请求
+     * @return 创建结果
      */
     public DifyCreateDocumentResponse createDocument(String datasetId, DifyCreateDocumentRequest request) {
         log.info("开始调用 Dify API 创建文档: datasetId={}, name={}", datasetId, request.getName());

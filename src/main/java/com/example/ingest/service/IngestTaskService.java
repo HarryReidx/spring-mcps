@@ -1,12 +1,15 @@
 package com.example.ingest.service;
 
 import com.example.ingest.entity.IngestTask;
+import com.example.ingest.model.DifyDatasetDetail;
 import com.example.ingest.model.IngestRequest;
 import com.example.ingest.model.IngestResponse;
 import com.example.ingest.repository.IngestTaskRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
@@ -20,6 +23,8 @@ import java.util.UUID;
 /**
  * 任务管理服务
  * 负责任务的创建、更新、查询和异步执行
+ * 
+ * @author HarryReid(黄药师)
  */
 @Slf4j
 @Service
@@ -30,14 +35,17 @@ public class IngestTaskService {
     private final DocumentIngestService documentIngestService;
     private final ObjectMapper objectMapper;
     
+    @Autowired
+    private ApplicationContext applicationContext;
+    
     /**
      * 创建任务并异步执行
      * 
      * @param request 入库请求
+     * @param dataset Dataset 详情
      * @return 任务 ID
      */
-    public UUID createAndExecuteTask(IngestRequest request) {
-        // 1. 创建任务记录
+    public UUID createAndExecuteTask(IngestRequest request, DifyDatasetDetail dataset) {
         IngestTask task = IngestTask.builder()
                 .datasetId(request.getDatasetId())
                 .fileName(request.getFileName())
@@ -45,7 +53,7 @@ public class IngestTaskService {
                 .fileType(request.getFileType())
                 .enableVlm(request.getEnableVlm())
                 .status(IngestTask.TaskStatus.PENDING)
-                .executionMode(IngestTask.ExecutionMode.ASYNC)  // 异步模式
+                .executionMode(IngestTask.ExecutionMode.ASYNC)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -53,17 +61,78 @@ public class IngestTaskService {
         task = taskRepository.save(task);
         log.info("创建异步任务: id={}, fileName={}", task.getId(), task.getFileName());
         
-        // 2. 异步执行任务
-        executeTaskAsync(task.getId(), request);
+        // 通过 Spring 代理调用异步方法
+        IngestTaskService self = applicationContext.getBean(IngestTaskService.class);
+        self.executeTaskAsync(task.getId(), request, dataset);
         
         return task.getId();
+    }
+
+    /**
+     * 创建任务并同步执行
+     * 
+     * @param request 入库请求
+     * @param dataset Dataset 详情
+     * @return 执行结果
+     */
+    public Map<String, Object> createAndExecuteTaskSync(IngestRequest request, DifyDatasetDetail dataset) {
+        IngestTask task = IngestTask.builder()
+                .datasetId(request.getDatasetId())
+                .fileName(request.getFileName())
+                .fileUrl(request.getFileUrl())
+                .fileType(request.getFileType())
+                .enableVlm(request.getEnableVlm())
+                .status(IngestTask.TaskStatus.PROCESSING)
+                .executionMode(IngestTask.ExecutionMode.SYNC)
+                .startTime(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        
+        task = taskRepository.save(task);
+        log.info("创建同步任务: id={}, fileName={}", task.getId(), task.getFileName());
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("taskId", task.getId().toString());
+        
+        try {
+            IngestResponse ingestResponse = documentIngestService.ingestDocument(request, IngestTask.ExecutionMode.SYNC, task.getId(), dataset);
+            
+            if (ingestResponse.isSuccess()) {
+                updateTaskSuccess(task.getId(), ingestResponse);
+                response.put("success", true);
+                response.put("status", "COMPLETED");
+                response.put("fileIds", ingestResponse.getFileIds());
+                response.put("stats", ingestResponse.getStats());
+                response.put("vlmCostTime", ingestResponse.getVlmCostTime());
+                response.put("totalCostTime", ingestResponse.getTotalCostTime());
+            } else {
+                updateTaskFailure(task.getId(), ingestResponse.getErrorMsg());
+                response.put("success", false);
+                response.put("status", "FAILED");
+                response.put("errorMsg", ingestResponse.getErrorMsg());
+            }
+            
+        } catch (Exception e) {
+            log.error("同步任务执行失败: {}", task.getId(), e);
+            updateTaskFailure(task.getId(), e.getMessage());
+            response.put("success", false);
+            response.put("status", "FAILED");
+            response.put("errorMsg", e.getMessage());
+        }
+        
+        return response;
     }
     
     /**
      * 异步执行任务
+     * 
+     * @param taskId 任务 ID
+     * @param request 入库请求
+     * @param dataset Dataset 详情
      */
     @Async
-    public void executeTaskAsync(UUID taskId, IngestRequest request) {
+    public void executeTaskAsync(UUID taskId, IngestRequest request, DifyDatasetDetail dataset) {
         log.info("开始异步执行任务: {}", taskId);
         
         // 1. 更新状态为 PROCESSING
@@ -71,7 +140,7 @@ public class IngestTaskService {
         
         try {
             // 2. 执行文档入库
-            IngestResponse response = documentIngestService.ingestDocument(request, IngestTask.ExecutionMode.ASYNC, taskId);
+            IngestResponse response = documentIngestService.ingestDocument(request, IngestTask.ExecutionMode.ASYNC, taskId, dataset);
             
             // 3. 更新任务结果
             if (response.isSuccess()) {
@@ -201,5 +270,28 @@ public class IngestTaskService {
         stats.put("successRate", String.format("%.2f%%", successRate));
         
         return stats;
+    }
+    
+    /**
+     * 批量删除任务
+     * 
+     * @param taskIds 任务 ID 列表
+     * @return 删除数量
+     */
+    public int deleteTasks(java.util.List<String> taskIds) {
+        int deletedCount = 0;
+        for (String taskId : taskIds) {
+            try {
+                UUID uuid = UUID.fromString(taskId);
+                if (taskRepository.existsById(uuid)) {
+                    taskRepository.deleteById(uuid);
+                    deletedCount++;
+                    log.info("删除任务: {}", taskId);
+                }
+            } catch (Exception e) {
+                log.error("删除任务失败: {}", taskId, e);
+            }
+        }
+        return deletedCount;
     }
 }

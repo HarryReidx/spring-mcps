@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * 应用配置属性
  * 映射 application.yml 中的 app.* 配置
+ * 
+ * @author HarryReid(黄药师)
  */
 @Data
 @Configuration
@@ -21,11 +23,8 @@ public class AppProperties {
     /** MinIO 存储配置 */
     private MinioConfig minio = new MinioConfig();
     
-    /** 文档分段配置 */
-    private ChunkingConfig chunking = new ChunkingConfig();
-    
-    /** 父子分段配置 */
-    private HierarchicalConfig hierarchical = new HierarchicalConfig();
+    /** 文档分段规则配置 */
+    private ProcessRuleConfig processRule = new ProcessRuleConfig();
     
     /** VLM 视觉模型配置 */
     private VlmConfig vlm = new VlmConfig();
@@ -82,10 +81,25 @@ public class AppProperties {
     }
 
     /**
-     * 文档分段配置（文本模型）
+     * 文档分段规则配置
      */
     @Data
-    public static class ChunkingConfig {
+    public static class ProcessRuleConfig {
+        /** 文本模型配置 */
+        private TextModelConfig textModel = new TextModelConfig();
+        
+        /** 层级模型（父子结构）配置 */
+        private HierarchicalModelConfig hierarchicalModel = new HierarchicalModelConfig();
+        
+        /** Q&A 模型配置 */
+        private QaModelConfig qaModel = new QaModelConfig();
+    }
+
+    /**
+     * 文本模型分段配置
+     */
+    @Data
+    public static class TextModelConfig {
         /** 分段分隔符 */
         private String separator = "\n";
         
@@ -97,18 +111,36 @@ public class AppProperties {
     }
 
     /**
-     * 父子分段配置（层级模型）
+     * 层级模型（父子结构）分段配置
      */
     @Data
-    public static class HierarchicalConfig {
+    public static class HierarchicalModelConfig {
+        /** 父分段分隔符 */
+        private String separator = "{{>1#}}";
+        
         /** 父分段最大 token 数 */
         private Integer maxTokens = 1024;
+        
+        /** 子分段分隔符 */
+        private String subSeparator = "{{>2#}}";
         
         /** 子分段最大 token 数 */
         private Integer subMaxTokens = 512;
         
         /** 分段重叠 token 数 */
         private Integer chunkOverlap = 50;
+        
+        /** 父分段模式 */
+        private String parentMode = "paragraph";
+    }
+
+    /**
+     * Q&A 模型配置
+     */
+    @Data
+    public static class QaModelConfig {
+        /** 是否启用 */
+        private Boolean enabled = false;
     }
 
     /**

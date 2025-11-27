@@ -24,5 +24,9 @@ export const taskApi = {
   
   createTask(data) {
     return api.post('/tasks', data)
+  },
+  
+  deleteTasks(taskIds) {
+    return api.delete('/tasks', { data: { taskIds } })
   }
 }

@@ -1,7 +1,6 @@
 package com.example.ingest.controller;
 
 import com.example.ingest.entity.IngestTask;
-import com.example.ingest.model.IngestRequest;
 import com.example.ingest.service.IngestTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,11 +12,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 任务管理控制器
- * 提供任务的创建、查询、统计等接口
+ * 提供任务列表查询、统计等接口
+ * 
+ * @author HarryReid(黄药师)
  */
 @Slf4j
 @RestController
@@ -26,40 +26,6 @@ import java.util.UUID;
 public class IngestTaskController {
     
     private final IngestTaskService taskService;
-    
-    /**
-     * 创建异步任务
-     * POST /api/dify/tasks
-     * 
-     * @return 任务 ID
-     */
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> createTask(@RequestBody IngestRequest request) {
-        log.info("创建异步任务: datasetId={}, fileName={}", request.getDatasetId(), request.getFileName());
-        
-        UUID taskId = taskService.createAndExecuteTask(request);
-        
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "taskId", taskId.toString(),
-                "message", "任务已创建，正在后台处理"
-        ));
-    }
-    
-    /**
-     * 查询任务详情
-     * GET /api/dify/tasks/{taskId}
-     */
-    @GetMapping("/{taskId}")
-    public ResponseEntity<IngestTask> getTask(@PathVariable String taskId) {
-        IngestTask task = taskService.getTask(UUID.fromString(taskId));
-        
-        if (task == null) {
-            return ResponseEntity.notFound().build();
-        }
-        
-        return ResponseEntity.ok(task);
-    }
     
     /**
      * 分页查询任务列表
@@ -96,5 +62,30 @@ public class IngestTaskController {
     public ResponseEntity<Map<String, Object>> getStats() {
         Map<String, Object> stats = taskService.getTaskStats();
         return ResponseEntity.ok(stats);
+    }
+    
+    /**
+     * 批量删除任务
+     * DELETE /api/dify/tasks
+     */
+    @DeleteMapping
+    public ResponseEntity<Map<String, Object>> deleteTasks(@RequestBody Map<String, Object> request) {
+        @SuppressWarnings("unchecked")
+        java.util.List<String> taskIds = (java.util.List<String>) request.get("taskIds");
+        
+        if (taskIds == null || taskIds.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "taskIds 不能为空"
+            ));
+        }
+        
+        int deletedCount = taskService.deleteTasks(taskIds);
+        
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "deletedCount", deletedCount,
+                "message", String.format("成功删除 %d 个任务", deletedCount)
+        ));
     }
 }

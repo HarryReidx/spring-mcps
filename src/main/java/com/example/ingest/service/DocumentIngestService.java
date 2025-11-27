@@ -27,6 +27,12 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+/**
+ * 文档入库服务
+ * 核心业务逻辑：文件下载、MinerU 解析、VLM 增强、Dify 入库
+ * 
+ * @author HarryReid(黄药师)
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -45,7 +51,16 @@ public class DocumentIngestService {
             .readTimeout(300, TimeUnit.SECONDS)
             .build();
 
-    public IngestResponse ingestDocument(IngestRequest request, IngestTask.ExecutionMode executionMode, UUID taskId) {
+    /**
+     * 文档入库主流程
+     * 
+     * @param request 入库请求
+     * @param executionMode 执行模式（SYNC/ASYNC）
+     * @param taskId 任务 ID
+     * @param dataset Dataset 详情
+     * @return 入库结果
+     */
+    public IngestResponse ingestDocument(IngestRequest request, IngestTask.ExecutionMode executionMode, UUID taskId, DifyDatasetDetail dataset) {
         log.info("开始处理文档入库: datasetId={}, fileName={}, enableVlm={}, mode={}", 
                 request.getDatasetId(), request.getFileName(), request.getEnableVlm(), executionMode);
         
@@ -53,9 +68,11 @@ public class DocumentIngestService {
         long vlmCostTime = 0;
         
         try {
-            // 1. 规则校验
-            validateProcessRule(request, taskId);
-            
+            // 1. 记录 Dataset 信息
+            logInfo(taskId, "开始处理文档", 
+                    String.format("indexingTechnique=%s, docForm=%s", 
+                            dataset.getIndexingTechnique(), dataset.getDocForm()));
+
             // 2. 下载文件
             File downloadedFile = downloadFile(request.getFileUrl(), request.getFileName());
             
@@ -83,7 +100,7 @@ public class DocumentIngestService {
             vlmCostTime = System.currentTimeMillis() - vlmStartTime;
             
             // 8. 调用 Dify API 写入知识库
-            DifyCreateDocumentRequest difyRequest = buildDifyRequest(request, finalMarkdown);
+            DifyCreateDocumentRequest difyRequest = buildDifyRequest(request, finalMarkdown, dataset);
             DifyCreateDocumentResponse difyResponse = difyClient.createDocument(request.getDatasetId(), difyRequest);
             
             // 9. 清理临时文件
@@ -115,23 +132,28 @@ public class DocumentIngestService {
     }
 
     /**
-     * 规则校验：防止空入库
+     * 前置校验：查询 Dataset 配置并校验规则
+     * 
+     * @param request 入库请求
+     * @param taskId 任务 ID
+     * @return Dataset 详情
      */
-    private void validateProcessRule(IngestRequest request, UUID taskId) {
+    public DifyDatasetDetail validateProcessRule(IngestRequest request, UUID taskId) {
         try {
-            // 获取 Dataset 详情
             DifyDatasetDetail dataset = difyClient.getDatasetDetail(request.getDatasetId());
             
-            logInfo(taskId, "获取 Dataset 详情成功", "类型: " + dataset.getIndexingTechnique());
+            logInfo(taskId, "获取 Dataset 详情成功", 
+                    String.format("indexingTechnique=%s, docForm=%s", 
+                            dataset.getIndexingTechnique(), dataset.getDocForm()));
             
-            // 根据 Dataset 类型生成默认规则
-            if (request.getSeparator() != null && !request.getSeparator().isEmpty()) {
-                // 用户自定义规则，需要校验
-                boolean isValid = validateCustomRule(request, dataset);
-                if (!isValid) {
-                    throw new IllegalArgumentException("自定义规则与 Dataset 配置不匹配，可能导致空入库");
+            // CUSTOM 模式下校验规则兼容性
+            if ("CUSTOM".equalsIgnoreCase(request.getChunkingMode())) {
+                if (request.getSeparator() == null || request.getSeparator().isEmpty()) {
+                    throw new IllegalArgumentException("CUSTOM 模式下必须指定 separator");
                 }
             }
+            
+            return dataset;
         } catch (Exception e) {
             log.error("规则校验失败", e);
             logError(taskId, "规则校验失败", e.getMessage());
@@ -139,11 +161,9 @@ public class DocumentIngestService {
         }
     }
 
-    private boolean validateCustomRule(IngestRequest request, DifyDatasetDetail dataset) {
-        // 简单校验逻辑
-        return true;
-    }
-
+    /**
+     * 下载文件到本地临时目录
+     */
     private File downloadFile(String fileUrl, String fileName) throws IOException {
         log.info("开始下载文件: {}", fileUrl);
         
@@ -173,6 +193,9 @@ public class DocumentIngestService {
         }
     }
 
+    /**
+     * 格式转换（如需要）
+     */
     private File convertToPdfIfNeeded(File file, String fileType) {
         if ("pdf".equalsIgnoreCase(fileType)) {
             return file;
@@ -182,6 +205,9 @@ public class DocumentIngestService {
         return file;
     }
 
+    /**
+     * 替换 Markdown 中的图片路径为真实 MinIO URL
+     */
     private String replaceImagePaths(String mdContent, Map<String, String> images, UUID taskId) {
         if (mdContent == null || images == null || images.isEmpty()) {
             log.info("无需替换图片路径");
@@ -227,6 +253,9 @@ public class DocumentIngestService {
         return result;
     }
 
+    /**
+     * 语义增强处理（VLM 图片分析）
+     */
     private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm, IngestRequest request) {
         Map<String, VlmClient.ImageAnalysisResult> analysisResults = null;
         
@@ -239,6 +268,9 @@ public class DocumentIngestService {
         return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, useDefaultSegmentation);
     }
 
+    /**
+     * 使用 VLM 批量分析图片
+     */
     private Map<String, VlmClient.ImageAnalysisResult> analyzeImagesWithVlm(Map<String, String> images) {
         List<java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult>> futures = new ArrayList<>();
         Map<String, String> imageUrls = getImageRealUrls(images);
@@ -265,6 +297,9 @@ public class DocumentIngestService {
         return results;
     }
 
+    /**
+     * 查询图片真实 URL
+     */
     private Map<String, String> getImageRealUrls(Map<String, String> images) {
         Map<String, String> urls = new HashMap<>();
         
@@ -287,89 +322,164 @@ public class DocumentIngestService {
         return urls;
     }
 
-    private DifyCreateDocumentRequest buildDifyRequest(IngestRequest request, String markdown) {
-        boolean isAutoMode = "AUTO".equalsIgnoreCase(request.getChunkingMode());
-        boolean isHierarchical = "hierarchical_model".equalsIgnoreCase(request.getDocForm());
+    /**
+     * 构建 Dify 请求体
+     * AUTO 模式：根据 Dataset 的 docForm 自动匹配规则
+     * CUSTOM 模式：使用用户自定义规则
+     * 
+     * @param request 入库请求
+     * @param markdown Markdown 内容
+     * @param dataset Dataset 详情
+     * @return Dify 请求体
+     */
+    private DifyCreateDocumentRequest buildDifyRequest(IngestRequest request, String markdown, DifyDatasetDetail dataset) {
+        boolean isAutoMode = request.getChunkingMode() == null || 
+                             request.getChunkingMode().isEmpty() || 
+                             "AUTO".equalsIgnoreCase(request.getChunkingMode());
+        
+        String docForm = dataset.getDocForm();
+        String indexingTechnique = dataset.getIndexingTechnique();
         
         DifyCreateDocumentRequest.ProcessRule processRule;
         
         if (isAutoMode) {
-            processRule = DifyCreateDocumentRequest.ProcessRule.builder()
-                    .mode("automatic")
-                    .build();
-        } else if (isHierarchical) {
-            Integer maxTokens = request.getMaxTokens() != null ? 
-                    request.getMaxTokens() : appProperties.getHierarchical().getMaxTokens();
-            Integer subMaxTokens = request.getSubMaxTokens() != null ? 
-                    request.getSubMaxTokens() : appProperties.getHierarchical().getSubMaxTokens();
-            Integer chunkOverlap = request.getChunkOverlap() != null ? 
-                    request.getChunkOverlap() : appProperties.getHierarchical().getChunkOverlap();
-            
-            processRule = DifyCreateDocumentRequest.ProcessRule.builder()
-                    .mode("hierarchical")
-                    .rules(DifyCreateDocumentRequest.Rules.builder()
-                            .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
-                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
-                                            .id("remove_extra_spaces")
-                                            .enabled(true)
-                                            .build(),
-                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
-                                            .id("remove_urls_emails")
-                                            .enabled(false)
-                                            .build()
-                            })
-                            .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                    .separator("{{>1#}}")
-                                    .maxTokens(maxTokens)
-                                    .chunkOverlap(chunkOverlap)
-                                    .build())
-                            .parentMode("paragraph")
-                            .subchunkSegmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                    .separator("{{>2#}}")
-                                    .maxTokens(subMaxTokens)
-                                    .chunkOverlap(chunkOverlap)
-                                    .build())
-                            .build())
-                    .build();
+            // AUTO 模式：根据 Dataset 类型自动匹配规则
+            if ("hierarchical_model".equalsIgnoreCase(docForm)) {
+                // 父子结构模型
+                AppProperties.HierarchicalModelConfig config = appProperties.getProcessRule().getHierarchicalModel();
+                processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                        .mode("hierarchical")
+                        .rules(DifyCreateDocumentRequest.Rules.builder()
+                                .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_extra_spaces")
+                                                .enabled(true)
+                                                .build(),
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_urls_emails")
+                                                .enabled(false)
+                                                .build()
+                                })
+                                .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                        .separator(config.getSeparator())
+                                        .maxTokens(config.getMaxTokens())
+                                        .chunkOverlap(config.getChunkOverlap())
+                                        .build())
+                                .parentMode(config.getParentMode())
+                                .subchunkSegmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                        .separator(config.getSubSeparator())
+                                        .maxTokens(config.getSubMaxTokens())
+                                        .chunkOverlap(config.getChunkOverlap())
+                                        .build())
+                                .build())
+                        .build();
+            } else if ("qa_model".equalsIgnoreCase(docForm)) {
+                // Q&A 模型
+                processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                        .mode("automatic")
+                        .build();
+            } else {
+                // 文本模型（默认）
+                AppProperties.TextModelConfig config = appProperties.getProcessRule().getTextModel();
+                processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                        .mode("custom")
+                        .rules(DifyCreateDocumentRequest.Rules.builder()
+                                .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_extra_spaces")
+                                                .enabled(true)
+                                                .build(),
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_urls_emails")
+                                                .enabled(false)
+                                                .build()
+                                })
+                                .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                        .separator(config.getSeparator())
+                                        .maxTokens(config.getMaxTokens())
+                                        .chunkOverlap(config.getChunkOverlap())
+                                        .build())
+                                .build())
+                        .build();
+            }
         } else {
-            Integer maxTokens = request.getMaxTokens() != null ? 
-                    request.getMaxTokens() : appProperties.getChunking().getMaxTokens();
-            Integer chunkOverlap = request.getChunkOverlap() != null ? 
-                    request.getChunkOverlap() : appProperties.getChunking().getChunkOverlap();
-            String separator = request.getSeparator() != null ? 
-                    request.getSeparator() : appProperties.getChunking().getSeparator();
-            
-            processRule = DifyCreateDocumentRequest.ProcessRule.builder()
-                    .mode("custom")
-                    .rules(DifyCreateDocumentRequest.Rules.builder()
-                            .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
-                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
-                                            .id("remove_extra_spaces")
-                                            .enabled(true)
-                                            .build(),
-                                    DifyCreateDocumentRequest.PreProcessingRule.builder()
-                                            .id("remove_urls_emails")
-                                            .enabled(false)
-                                            .build()
-                            })
-                            .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                    .separator(separator)
-                                    .maxTokens(maxTokens)
-                                    .chunkOverlap(chunkOverlap)
-                                    .build())
-                            .build())
-                    .build();
+            // CUSTOM 模式：使用用户自定义规则
+            if ("hierarchical_model".equalsIgnoreCase(docForm)) {
+                // 父子结构模型
+                AppProperties.HierarchicalModelConfig defaultConfig = appProperties.getProcessRule().getHierarchicalModel();
+                Integer maxTokens = request.getMaxTokens() != null ? request.getMaxTokens() : defaultConfig.getMaxTokens();
+                Integer subMaxTokens = request.getSubMaxTokens() != null ? request.getSubMaxTokens() : defaultConfig.getSubMaxTokens();
+                Integer chunkOverlap = request.getChunkOverlap() != null ? request.getChunkOverlap() : defaultConfig.getChunkOverlap();
+                String separator = request.getSeparator() != null ? request.getSeparator() : defaultConfig.getSeparator();
+                
+                processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                        .mode("hierarchical")
+                        .rules(DifyCreateDocumentRequest.Rules.builder()
+                                .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_extra_spaces")
+                                                .enabled(true)
+                                                .build(),
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_urls_emails")
+                                                .enabled(false)
+                                                .build()
+                                })
+                                .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                        .separator(separator)
+                                        .maxTokens(maxTokens)
+                                        .chunkOverlap(chunkOverlap)
+                                        .build())
+                                .parentMode(defaultConfig.getParentMode())
+                                .subchunkSegmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                        .separator(defaultConfig.getSubSeparator())
+                                        .maxTokens(subMaxTokens)
+                                        .chunkOverlap(chunkOverlap)
+                                        .build())
+                                .build())
+                        .build();
+            } else {
+                // 文本模型
+                AppProperties.TextModelConfig defaultConfig = appProperties.getProcessRule().getTextModel();
+                Integer maxTokens = request.getMaxTokens() != null ? request.getMaxTokens() : defaultConfig.getMaxTokens();
+                Integer chunkOverlap = request.getChunkOverlap() != null ? request.getChunkOverlap() : defaultConfig.getChunkOverlap();
+                String separator = request.getSeparator() != null ? request.getSeparator() : defaultConfig.getSeparator();
+                
+                processRule = DifyCreateDocumentRequest.ProcessRule.builder()
+                        .mode("custom")
+                        .rules(DifyCreateDocumentRequest.Rules.builder()
+                                .preProcessingRules(new DifyCreateDocumentRequest.PreProcessingRule[]{
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_extra_spaces")
+                                                .enabled(true)
+                                                .build(),
+                                        DifyCreateDocumentRequest.PreProcessingRule.builder()
+                                                .id("remove_urls_emails")
+                                                .enabled(false)
+                                                .build()
+                                })
+                                .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
+                                        .separator(separator)
+                                        .maxTokens(maxTokens)
+                                        .chunkOverlap(chunkOverlap)
+                                        .build())
+                                .build())
+                        .build();
+            }
         }
         
         return DifyCreateDocumentRequest.builder()
                 .name(request.getFileName())
                 .text(markdown)
-                .indexingTechnique(request.getIndexingTechnique())
-                .docForm(request.getDocForm())
+                .indexingTechnique(indexingTechnique)
+                .docForm(docForm)
                 .processRule(processRule)
                 .build();
     }
 
+    /**
+     * 清理临时文件
+     */
     private void cleanupTempFiles(File... files) {
         for (File file : files) {
             if (file != null && file.exists()) {
@@ -383,6 +493,9 @@ public class DocumentIngestService {
         }
     }
 
+    /**
+     * 记录 INFO 级别日志
+     */
     private void logInfo(UUID taskId, String message, String detail) {
         if (taskId != null) {
             IngestTaskLog log = IngestTaskLog.builder()
@@ -396,6 +509,9 @@ public class DocumentIngestService {
         }
     }
 
+    /**
+     * 记录 WARN 级别日志
+     */
     private void logWarn(UUID taskId, String message, String detail) {
         if (taskId != null) {
             IngestTaskLog log = IngestTaskLog.builder()
@@ -409,6 +525,9 @@ public class DocumentIngestService {
         }
     }
 
+    /**
+     * 记录 ERROR 级别日志
+     */
     private void logError(UUID taskId, String message, String detail) {
         if (taskId != null) {
             IngestTaskLog log = IngestTaskLog.builder()
