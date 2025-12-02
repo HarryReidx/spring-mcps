@@ -91,6 +91,9 @@ public class DocumentIngestService {
                     mdContent != null ? mdContent.length() : 0, 
                     images != null ? images.size() : 0);
             
+            // 5.1 保存 Markdown 到本地（如果启用）
+            saveMdToTempIfEnabled(mdContent, request.getFileName(), taskId);
+            
             // 6. 处理图片：替换 markdown 中的临时路径为真实 MinIO URL
             String markdownWithRealUrls = replaceImagePaths(mdContent, images, taskId);
             
@@ -477,6 +480,33 @@ public class DocumentIngestService {
                 .build();
     }
 
+    /**
+     * 保存 Markdown 到本地 temp 目录（调试用）
+     */
+    private void saveMdToTempIfEnabled(String mdContent, String fileName, UUID taskId) {
+        if (appProperties.getDebug() == null || !Boolean.TRUE.equals(appProperties.getDebug().getSaveMd())) {
+            return;
+        }
+        
+        if (mdContent == null || mdContent.isEmpty()) {
+            log.warn("Markdown 内容为空，跳过保存");
+            return;
+        }
+        
+        try {
+            String tempDir = System.getProperty("java.io.tmpdir");
+            String mdFileName = fileName.replaceAll("\\.[^.]+$", "") + ".md";
+            File mdFile = new File(tempDir, mdFileName);
+            
+            Files.writeString(mdFile.toPath(), mdContent);
+            log.info("Markdown 已保存到: {}", mdFile.getAbsolutePath());
+            logInfo(taskId, "Markdown 已保存", mdFile.getAbsolutePath());
+        } catch (Exception e) {
+            log.error("保存 Markdown 失败", e);
+            logWarn(taskId, "保存 Markdown 失败", e.getMessage());
+        }
+    }
+    
     /**
      * 清理临时文件
      */

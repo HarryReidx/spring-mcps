@@ -28,6 +28,9 @@ public class AppProperties {
     
     /** VLM 视觉模型配置 */
     private VlmConfig vlm = new VlmConfig();
+    
+    /** 调试配置 */
+    private DebugConfig debug = new DebugConfig();
 
     /**
      * Dify API 配置
@@ -165,5 +168,14 @@ public class AppProperties {
         
         /** 提示词 */
         private String prompt = "请详细描述这张图片的内容，并提取其中的所有文字。格式：描述: [图片描述]\nOCR: [提取的文字]";
+    }
+    
+    /**
+     * 调试配置
+     */
+    @Data
+    public static class DebugConfig {
+        /** 是否保存 MinerU 解析后的 Markdown 文件到本地 temp 目录 */
+        private Boolean saveMd = false;
     }
 }
