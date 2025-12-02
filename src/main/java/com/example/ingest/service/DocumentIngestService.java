@@ -10,6 +10,7 @@ import com.example.ingest.entity.ToolFile;
 import com.example.ingest.model.*;
 import com.example.ingest.repository.IngestTaskLogRepository;
 import com.example.ingest.repository.ToolFileRepository;
+import com.example.ingest.util.TextCleaningUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
@@ -90,6 +91,10 @@ public class DocumentIngestService {
             log.info("MinerU 返回: markdown 长度={}, 图片数量={}", 
                     mdContent != null ? mdContent.length() : 0, 
                     images != null ? images.size() : 0);
+            
+            // 5.0 清洗 Markdown 文本（修复康熙部首问题）
+            mdContent = TextCleaningUtils.cleanText(mdContent);
+            log.info("文本清洗完成，清洗后长度={}", mdContent != null ? mdContent.length() : 0);
             
             // 5.1 保存 Markdown 到本地（如果启用）
             saveMdToTempIfEnabled(mdContent, request.getFileName(), taskId);
