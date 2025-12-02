@@ -480,7 +480,7 @@ public class DocumentIngestService {
                 .name(request.getFileName())
                 .text(markdown)
                 .indexingTechnique(indexingTechnique)
-                .docForm(docForm)
+                .docForm(docForm != null ? docForm : "text_model")
                 .processRule(processRule)
                 .build();
     }
