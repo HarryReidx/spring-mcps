@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="60 seconds" debug="false">
+    <!--
+      总述说明：
+
+      1. 基础设置
+         - 通过 spring.application.name 作为日志中的应用标识。
+         - 统一使用 UTF-8 编码。
+         - 日志目录、单文件大小、历史保留数量、总大小等支持通过环境变量覆盖：
+           LOG_HOME / MAX_LOG_FILE_SIZE / MAX_LOG_HISTORY_NUMBER / MAX_LOG_TOTAL_SIZE。
+
+      2. 输出目标
+         - 控制台（STDOUT）：输出 INFO 及以上级别日志，适合本地开发或容器环境查看。
+         - 文件输出采用多文件拆分方案：
+           * 通用标准日志：${application}-std.log（INFO+）
+           * 按级别拆分：
+             - trace/${application}-trace.log
+             - debug/${application}-debug.log
+             - info/${application}-info.log
+             - warn/${application}-warn.log
+             - error/${application}-error.log
+
+      3. 滚动策略
+         - 所有 RollingFileAppender 均使用 SizeAndTimeBasedRollingPolicy：
+           * 按日期目录和小时（yyyy_MM_dd / yyyy-MM-dd-HH）切分。
+           * 超过 MAX_FILE_SIZE 时按 index 继续切分。
+           * 最多保留 MAX_HISTORY 个时间片。
+           * 所有归档文件总大小不超过 TOTAL_SIZE_CAP。
+
+      4. 日志格式
+         - 统一包含：
+           * 时间戳、应用名、日志级别、traceId（MDC）、线程名、logger 名称、日志内容。
+         - 控制台使用带颜色的 CONSOLE_LOG_PATTERN，便于快速阅读。
+
+      5. logger 级别定制
+         - net.tsingyun 包：级别设置为 TRACE，并单独输出到 RollingFileTrace，用于详细链路排查。
+         - 某些噪音较大的组件（eureka、nacos 等）单独降为 ERROR，减少无关日志干扰。
+         - root logger 默认 INFO，接入控制台、std.log 和按级别拆分的 debug/info/warn/error 日志文件。
+
+      使用建议：
+         - 日常线上排查：优先查看 info / warn / error 子目录下日志。
+         - 深度问题排查（链路级）：可查看 trace 目录（前提是对应包级别开启为 TRACE）。
+         - 若磁盘压力较大，可适当调小 MAX_HISTORY 或 TOTAL_SIZE_CAP，或只保留必要级别的 appender。
+    -->
+
+    <!-- 引入 Spring Boot 默认的 Logback 配置 -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- 应用名称，用于日志输出中标识 -->
+    <springProperty scope="context" name="application" source="spring.application.name" defaultValue="spring-app"/>
+
+    <!-- 日志编码 -->
+    <property name="LOG_CHARSET" value="UTF-8"/>
+
+    <!-- 日志目录，默认 ./logs -->
+    <property name="LOG_HOME" value="${LOG_HOME:-./logs}"/>
+
+    <!-- 单个日志文件最大大小 -->
+    <property name="MAX_FILE_SIZE" value="${MAX_LOG_FILE_SIZE:-10MB}"/>
+
+    <!-- 最大历史文件数（按小时滚动） -->
+    <property name="MAX_HISTORY" value="${MAX_LOG_HISTORY_NUMBER:-168}"/> <!-- 默认 7 天，每小时一个 -->
+
+    <!-- 所有日志文件目录的最大容量 -->
+    <property name="TOTAL_SIZE_CAP" value="${MAX_LOG_TOTAL_SIZE:-5GB}"/>
+
+    <!-- 文件日志格式 -->
+    <property name="FILE_LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss:SSS} [${application}] [%p] [%8.8X{traceId}] --- [%+5t] %-40logger{36} : %m%n"/>
+
+    <!-- 控制台日志格式（带颜色） -->
+    <property name="CONSOLE_LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr([${application}]){blue} %clr([%8.8X{traceId}]){yellow} --- [%15.15t] %clr(%-40.40c{36}){cyan} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+
+    <!-- ================= 控制台输出（INFO 级别及以上） ================= -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- 只输出 INFO 及以上 -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <!-- ================= 通用 INFO 文件滚动日志 ================= -->
+    <!-- 写入到 ${application}-std.log，INFO+级别 -->
+    <appender name="RollingFileStd" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/${application}-std.log</file>
+
+        <!-- 只记录 INFO 及以上日志 -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+
+        <!-- 基于时间 + 大小的日志滚动策略 -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- 按日期目录 + 小时 + index -->
+            <fileNamePattern>${LOG_HOME}/std/archive/%d{yyyy_MM_dd}/${application}-std-%d{yyyy-MM-dd-HH}-%i.log.zip</fileNamePattern>
+            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ================= TRACE 级别日志 ================= -->
+    <!-- 单独输出 TRACE 日志文件，便于排查链路级日志 -->
+    <appender name="RollingFileTrace" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/trace/${application}-trace.log</file>
+
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>TRACE</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+
+        <!-- TRACE 也按小时滚动 -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/trace/archive/%d{yyyy_MM_dd}/${application}-trace-%d{yyyy-MM-dd-HH}-%i.log.zip</fileNamePattern>
+            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ================= DEBUG 级别日志 ================= -->
+    <appender name="RollingFileDebug" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/debug/${application}-debug.log</file>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>DEBUG</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/debug/archive/%d{yyyy_MM_dd}/${application}-debug-%d{yyyy-MM-dd-HH}-%i.log.zip</fileNamePattern>
+            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ================= INFO 级别单独日志 ================= -->
+    <appender name="RollingFileInfo" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/info/${application}-info.log</file>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>INFO</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/info/archive/%d{yyyy_MM_dd}/${application}-info-%d{yyyy-MM-dd-HH}-%i.log.zip</fileNamePattern>
+            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ================= WARN 级别日志 ================= -->
+    <appender name="RollingFileWarn" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/warn/${application}-warn.log</file>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>WARN</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/warn/archive/%d{yyyy_MM_dd}/${application}-warn-%d{yyyy-MM-dd-HH}-%i.log.zip</fileNamePattern>
+            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ================= ERROR 级别日志 ================= -->
+    <appender name="RollingFileError" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/error/${application}-error.log</file>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>ERROR</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_CHARSET}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/error/archive/%d{yyyy_MM_dd}/${application}-error-%d{yyyy-MM-dd-HH}-%i.log.zip</fileNamePattern>
+            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ================= 日志包级别的特殊处理 ================= -->
+
+    <!-- 指定 net.tsingyun 包为 TRACE，可输出链路级调试 -->
+    <logger name="net.tsingyun" level="trace">
+        <appender-ref ref="RollingFileTrace"/>
+    </logger>
+
+    <!-- 其他单独提升或降低日志级别的类 -->
+    <logger name="com.netflix.discovery.shared.resolver.aws.ConfigClusterResolver" level="error" />
+    <logger name="net.tsingyun.commons.core.util.JsonUtils" level="error" />
+    <logger name="com.alibaba.nacos.client.config.impl.ClientWorker" level="error" />
+
+    <!-- ================= 根日志配置（默认 INFO） ================= -->
+    <root level="info">
+        <!-- 控制台输出 -->
+        <appender-ref ref="STDOUT"/>
+        <!-- 多级文件输出 -->
+        <appender-ref ref="RollingFileStd"/>
+        <appender-ref ref="RollingFileDebug"/>
+        <appender-ref ref="RollingFileInfo"/>
+        <appender-ref ref="RollingFileWarn"/>
+        <appender-ref ref="RollingFileError"/>
+    </root>
+
+</configuration>
