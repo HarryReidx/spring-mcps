@@ -22,6 +22,11 @@ server:
 
 # 应用配置
 app:
+  # 默认配置
+  default:
+    indexing-technique: high_quality      # 默认索引为高质量
+    doc-form: hierarchical_model          # 默认文档类型（父子分段）
+  
   # Dify API 配置
   dify:
     api-key: ${DIFY_API_KEY:dataset-CxGlfh0xHkUoCts6dj17XUhw}  # Dify API 密钥

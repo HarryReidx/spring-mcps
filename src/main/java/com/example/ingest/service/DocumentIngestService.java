@@ -104,7 +104,7 @@ public class DocumentIngestService {
             
             // 7. 语义增强处理（记录 VLM 耗时）
             long vlmStartTime = System.currentTimeMillis();
-            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm(), request);
+            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm(), request, dataset);
             vlmCostTime = System.currentTimeMillis() - vlmStartTime;
             
             // 8. 调用 Dify API 写入知识库
@@ -154,8 +154,10 @@ public class DocumentIngestService {
                     String.format("indexingTechnique=%s, docForm=%s", 
                             dataset.getIndexingTechnique(), dataset.getDocForm()));
             
-            // CUSTOM 模式下校验规则兼容性
-            if ("CUSTOM".equalsIgnoreCase(request.getChunkingMode())) {
+            // CUSTOM 模式下校验规则兼容性（修正拼写错误）
+            String chunkingMode = request.getChunkingMode();
+            if (chunkingMode != null && 
+                (chunkingMode.equalsIgnoreCase("CUSTOM") || chunkingMode.equalsIgnoreCase("CONSUTOM"))) {
                 if (request.getSeparator() == null || request.getSeparator().isEmpty()) {
                     throw new IllegalArgumentException("CUSTOM 模式下必须指定 separator");
                 }
@@ -264,7 +266,7 @@ public class DocumentIngestService {
     /**
      * 语义增强处理（VLM 图片分析）
      */
-    private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm, IngestRequest request) {
+    private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm, IngestRequest request, DifyDatasetDetail dataset) {
         Map<String, VlmClient.ImageAnalysisResult> analysisResults = null;
         
         if (Boolean.TRUE.equals(enableVlm) && images != null && !images.isEmpty()) {
@@ -272,8 +274,14 @@ public class DocumentIngestService {
             analysisResults = analyzeImagesWithVlm(images);
         }
         
-        boolean useDefaultSegmentation = request.getSeparator() == null || request.getSeparator().isEmpty();
-        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, useDefaultSegmentation);
+        // 判断是否使用父子分段格式：基于 Dataset 的 docForm（已在 buildDifyRequest 中处理默认值）
+        String docForm = dataset.getDocForm();
+        if (docForm == null) {
+            docForm = appProperties.getDefaultConfig().getDocForm();
+        }
+        boolean useHierarchicalFormat = "hierarchical_model".equalsIgnoreCase(docForm);
+        
+        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, useHierarchicalFormat);
     }
 
     /**
@@ -347,6 +355,11 @@ public class DocumentIngestService {
         
         String docForm = dataset.getDocForm();
         String indexingTechnique = dataset.getIndexingTechnique();
+        
+        // 如果 docForm 为 null，使用默认配置
+        if (docForm == null) {
+            docForm = appProperties.getDefaultConfig().getDocForm();
+        }
         
         DifyCreateDocumentRequest.ProcessRule processRule;
         
@@ -479,8 +492,8 @@ public class DocumentIngestService {
         return DifyCreateDocumentRequest.builder()
                 .name(request.getFileName())
                 .text(markdown)
-                .indexingTechnique(indexingTechnique)
-                .docForm(docForm != null ? docForm : "text_model")
+                .indexingTechnique(indexingTechnique != null ? indexingTechnique : appProperties.getDefaultConfig().getIndexingTechnique())
+                .docForm(docForm)
                 .processRule(processRule)
                 .build();
     }

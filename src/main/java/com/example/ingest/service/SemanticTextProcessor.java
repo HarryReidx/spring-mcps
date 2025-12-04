@@ -28,27 +28,26 @@ public class SemanticTextProcessor {
      * 
      * @param markdown 原始 Markdown
      * @param imageAnalysisResults VLM 图片分析结果（可选）
-     * @param useDefaultSegmentation 是否使用默认分段策略（如果是，则需要替换标题格式）
+     * @param useHierarchicalFormat 是否使用默认分段策略（如果是，则需要替换标题格式）
      * @return 增强后的 Markdown
      */
-    public String enrichMarkdown(String markdown, Map<String, VlmClient.ImageAnalysisResult> imageAnalysisResults, boolean useDefaultSegmentation) {
-        log.info("开始语义增强处理，原始文本长度: {}, 使用默认分段: {}", markdown.length(), useDefaultSegmentation);
+    public String enrichMarkdown(String markdown, Map<String, VlmClient.ImageAnalysisResult> imageAnalysisResults, boolean useHierarchicalFormat) {
+        log.info("开始语义增强处理，原始文本长度: {}, 使用父子分段格式: {}", markdown.length(), useHierarchicalFormat);
         
-        // 0. 如果使用默认分段，先进行格式预处理
-        String processedMarkdown = markdown;
-        if (useDefaultSegmentation) {
-            processedMarkdown = preprocessForDefaultSegmentation(markdown);
-        }
-        
-        // 1. 解析标题结构
-        List<HeaderNode> headers = parseHeaders(processedMarkdown);
+        // 1. 解析标题结构（在格式替换前）
+        List<HeaderNode> headers = parseHeaders(markdown);
         
         // 2. 注入标题上下文
-        String enrichedMarkdown = injectHeaderContext(processedMarkdown, headers);
+        String enrichedMarkdown = injectHeaderContext(markdown, headers);
         
         // 3. 增强图片描述（如果启用了 VLM）
         if (imageAnalysisResults != null && !imageAnalysisResults.isEmpty()) {
             enrichedMarkdown = enrichImageDescriptions(enrichedMarkdown, imageAnalysisResults);
+        }
+        
+        // 4. 最后进行格式替换（父子分段格式）
+        if (useHierarchicalFormat) {
+            enrichedMarkdown = preprocessForHierarchicalFormat(enrichedMarkdown);
         }
         
         log.info("语义增强完成，增强后文本长度: {}", enrichedMarkdown.length());
@@ -63,17 +62,15 @@ public class SemanticTextProcessor {
     }
 
     /**
-     * 格式预处理：针对 Dify 默认分段策略的优化
-     * 
-     * 1. 父子分段标识替换：# -> {{>1#}}, ## -> {{>2#}}
-     * 2. 表格防截断处理：保护表格内的换行符
+     * 格式转换：将标准 Markdown 标题转换为 Dify 父子分段格式
+     * # -> {{>1#}}, ## -> {{>2#}}
      */
-    private String preprocessForDefaultSegmentation(String markdown) {
-        log.debug("开始格式预处理（父子分段优化）");
+    private String preprocessForHierarchicalFormat(String markdown) {
+        log.debug("开始格式转换（父子分段格式）");
         
         String result = markdown;
         
-        // 1. 替换标题格式（从 ###### 到 # 逆序替换，避免重复替换）
+        // 替换标题格式（从 ###### 到 # 逆序替换，避免重复替换）
         result = result.replaceAll("(?m)^######\\s+", "{{>6#}} ");
         result = result.replaceAll("(?m)^#####\\s+", "{{>5#}} ");
         result = result.replaceAll("(?m)^####\\s+", "{{>4#}} ");
@@ -81,34 +78,11 @@ public class SemanticTextProcessor {
         result = result.replaceAll("(?m)^##\\s+", "{{>2#}} ");
         result = result.replaceAll("(?m)^#\\s+", "{{>1#}} ");
         
-        // 2. 表格防截断处理
-        result = protectTableNewlines(result);
-        
-        log.debug("格式预处理完成");
+        log.debug("格式转换完成");
         return result;
     }
     
-    /**
-     * 保护表格内的换行符，防止被 Dify 默认分段符切断
-     * 策略：将表格区域内的换行符替换为特殊占位符
-     */
-    private String protectTableNewlines(String markdown) {
-        // 匹配 Markdown 表格（简单实现：连续的 | 开头的行）
-        Pattern tablePattern = Pattern.compile("((?:^\\|.+\\|\\s*$\\n?)+)", Pattern.MULTILINE);
-        Matcher matcher = tablePattern.matcher(markdown);
-        
-        StringBuffer result = new StringBuffer();
-        while (matcher.find()) {
-            String table = matcher.group(1);
-            // 将表格内的换行符替换为占位符
-            String protectedTable = table.replace("\n", "{{TABLE_NEWLINE}}");
-            matcher.appendReplacement(result, Matcher.quoteReplacement(protectedTable));
-        }
-        matcher.appendTail(result);
-        
-        return result.toString();
-    }
-    
+
     /**
      * 解析 Markdown 标题结构
      */
