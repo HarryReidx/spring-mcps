@@ -141,6 +141,9 @@ public class AppProperties {
 
         /** 父分段模式 */
         private String parentMode = "paragraph";
+        
+        /** 递归预切分安全阈值 */
+        private Integer safeSplitThreshold = 450;
     }
 
     /**

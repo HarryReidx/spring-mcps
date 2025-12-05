@@ -274,14 +274,19 @@ public class DocumentIngestService {
             analysisResults = analyzeImagesWithVlm(images);
         }
         
-        // 判断是否使用父子分段格式：基于 Dataset 的 docForm（已在 buildDifyRequest 中处理默认值）
+        // 判断是否进行标题处理：仅在 AUTO 模式 + 父子分段时
+        boolean isAutoMode = request.getChunkingMode() == null || 
+                             request.getChunkingMode().isEmpty() || 
+                             "AUTO".equalsIgnoreCase(request.getChunkingMode());
+        
         String docForm = dataset.getDocForm();
         if (docForm == null) {
             docForm = appProperties.getDefaultConfig().getDocForm();
         }
-        boolean useHierarchicalFormat = "hierarchical_model".equalsIgnoreCase(docForm);
         
-        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, useHierarchicalFormat);
+        boolean enableHeaderProcessing = isAutoMode && "hierarchical_model".equalsIgnoreCase(docForm);
+        
+        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, enableHeaderProcessing);
     }
 
     /**
