@@ -49,12 +49,13 @@ public class VlmClient {
      * 
      * @param imageUrl 图片 URL
      * @param imageName 图片名称（用于日志）
+     * @param context 图片周围的上下文文本（前后各20字符）
      * @return CompletableFuture<ImageAnalysisResult>
      */
-    public CompletableFuture<ImageAnalysisResult> analyzeImageAsync(String imageUrl, String imageName) {
+    public CompletableFuture<ImageAnalysisResult> analyzeImageAsync(String imageUrl, String imageName, String context) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                return analyzeImage(imageUrl, imageName);
+                return analyzeImage(imageUrl, imageName, context);
             } catch (Exception e) {
                 log.error("VLM 分析图片失败: {}", imageName, e);
                 return ImageAnalysisResult.builder()
@@ -72,9 +73,10 @@ public class VlmClient {
      * 
      * @param imageUrl 图片 URL
      * @param imageName 图片名称
+     * @param context 图片周围的上下文文本
      * @return 分析结果
      */
-    private ImageAnalysisResult analyzeImage(String imageUrl, String imageName) throws IOException {
+    private ImageAnalysisResult analyzeImage(String imageUrl, String imageName, String context) throws IOException {
         long startTime = System.currentTimeMillis();
         log.info("开始 VLM 分析图片: {}", imageName);
         
@@ -91,8 +93,12 @@ public class VlmClient {
             imageData = imageUrl;
         }
         
+        // 拼接上下文到 Prompt
+        String configPrompt = vlmConfig.getPrompt();
+        String finalPrompt = String.format("结合图片周围的上下文文本：【%s】，%s", context, configPrompt);
+        
         // 构建请求体
-        String requestBody = buildVisionRequest(imageData, vlmConfig.getPrompt(), provider);
+        String requestBody = buildVisionRequest(imageData, finalPrompt, provider);
         
         // 构建请求
         Request.Builder requestBuilder = new Request.Builder()

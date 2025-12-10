@@ -46,10 +46,11 @@ public class DocumentIngestService {
     private final ToolFileRepository toolFileRepository;
     private final IngestTaskLogRepository taskLogRepository;
     private final AppProperties appProperties;
+    private final MinioService minioService;
     
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(300, TimeUnit.SECONDS)
+            .readTimeout(1800, TimeUnit.SECONDS)  // 30分钟，解决大文件下载超时
             .build();
 
     /**
@@ -235,6 +236,7 @@ public class DocumentIngestService {
         
         try {
             List<String> imageNames = new ArrayList<>(images.keySet());
+            
             List<ToolFile> toolFiles = toolFileRepository.findByNameIn(imageNames);
             Map<String, String> nameToFileKey = new HashMap<>();
             for (ToolFile toolFile : toolFiles) {
@@ -242,6 +244,27 @@ public class DocumentIngestService {
             }
             
             log.info("从数据库查询到 {} 条图片记录", toolFiles.size());
+            
+            // 如果数据库无记录，尝试上传图片到 MinIO
+            if (toolFiles.isEmpty() && !imageNames.isEmpty()) {
+                log.info("数据库无图片记录，开始上传到 MinIO");
+                logInfo(taskId, "开始上传图片", String.format("共 %d 张图片", imageNames.size()));
+                
+                int successCount = 0;
+                for (String imageName : imageNames) {
+                    try {
+                        String base64Data = images.get(imageName);
+                        String fileKey = minioService.uploadImage(imageName, base64Data);
+                        nameToFileKey.put(imageName, fileKey);
+                        successCount++;
+                    } catch (Exception e) {
+                        log.error("图片上传失败: {}", imageName, e);
+                    }
+                }
+                
+                log.info("图片上传完成: 成功 {}/{}", successCount, imageNames.size());
+                logInfo(taskId, "图片上传完成", String.format("成功 %d/%d", successCount, imageNames.size()));
+            }
             
             for (String imageName : imageNames) {
                 String fileKey = nameToFileKey.get(imageName);
@@ -299,7 +322,8 @@ public class DocumentIngestService {
         for (Map.Entry<String, String> entry : imageUrls.entrySet()) {
             String imageName = entry.getKey();
             String imageUrl = entry.getValue();
-            futures.add(vlmClient.analyzeImageAsync(imageUrl, imageUrl));
+            // 传入空上下文，实际上下文在 enrichImageDescriptions 中提取
+            futures.add(vlmClient.analyzeImageAsync(imageUrl, imageUrl, ""));
         }
         
         java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
@@ -517,7 +541,7 @@ public class DocumentIngestService {
         }
         
         try {
-            String tempDir = System.getProperty("java.io.tmpdir");
+            String tempDir = System.getProperty("tmp"); // todo-hx 改回去
             String mdFileName = fileName.replaceAll("\\.[^.]+$", "") + ".md";
             File mdFile = new File(tempDir, mdFileName);
             

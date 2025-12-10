@@ -29,8 +29,8 @@ public class MineruClient {
     private OkHttpClient getHttpClient() {
         return new OkHttpClient.Builder()
                 .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(300, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(1800, TimeUnit.SECONDS)  // 30分钟，解决大文件解析超时
+                .writeTimeout(300, TimeUnit.SECONDS)
                 .build();
     }
 

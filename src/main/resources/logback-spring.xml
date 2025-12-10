@@ -74,7 +74,7 @@
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <!-- 只输出 INFO 及以上 -->
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>INFO</level>
+            <level>DEBUG</level>
         </filter>
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
             <pattern>${CONSOLE_LOG_PATTERN}</pattern>

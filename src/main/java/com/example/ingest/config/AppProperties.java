@@ -85,8 +85,13 @@ public class AppProperties {
      */
     @Data
     public static class MinioConfig {
-        /** 图片路径前缀 */
+        private String endpoint;
+        private String accessKey;
+        private String secretKey;
+        private String bucketName;
+        private String region;
         private String imgPathPrefix;
+        private String uploadPath = "knowledge-images/";
     }
 
     /**

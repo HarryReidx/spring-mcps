@@ -39,6 +39,9 @@ public class DocumentIngestController {
     public ResponseEntity<Map<String, Object>> ingestDocumentAsync(@RequestBody IngestRequest request) {
         log.info("收到异步文档入库请求: datasetId={}, fileName={}", request.getDatasetId(), request.getFileName());
         
+        // 参数校验
+        validateRequest(request);
+        
         // 前置校验：查询 Dataset 配置
         DifyDatasetDetail dataset = validateAndGetDataset(request);
         
@@ -60,6 +63,9 @@ public class DocumentIngestController {
     public ResponseEntity<Map<String, Object>> ingestDocumentSync(@RequestBody IngestRequest request) {
         log.info("收到同步文档入库请求: datasetId={}, fileName={}", request.getDatasetId(), request.getFileName());
         
+        // 参数校验
+        validateRequest(request);
+        
         // 前置校验：查询 Dataset 配置
         DifyDatasetDetail dataset = validateAndGetDataset(request);
         
@@ -67,6 +73,24 @@ public class DocumentIngestController {
         Map<String, Object> response = ingestTaskService.createAndExecuteTaskSync(request, dataset);
         
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 参数校验
+     */
+    private void validateRequest(IngestRequest request) {
+        if (request.getDatasetId() == null || request.getDatasetId().isEmpty()) {
+            throw new IllegalArgumentException("datasetId 不能为空");
+        }
+        if (request.getFileUrl() == null || request.getFileUrl().isEmpty()) {
+            throw new IllegalArgumentException("fileUrl 不能为空");
+        }
+        if (request.getFileName() == null || request.getFileName().isEmpty()) {
+            throw new IllegalArgumentException("fileName 不能为空");
+        }
+        if (request.getFileType() == null || request.getFileType().isEmpty()) {
+            throw new IllegalArgumentException("fileType 不能为空");
+        }
     }
 
     /**

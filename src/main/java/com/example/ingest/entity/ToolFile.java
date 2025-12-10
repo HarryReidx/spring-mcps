@@ -4,6 +4,8 @@ import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
+import java.util.UUID;
+
 /**
  * tool_files 表实体
  * 用于查询图片的真实存储路径
@@ -11,9 +13,9 @@ import org.springframework.data.relational.core.mapping.Table;
 @Data
 @Table("tool_files")
 public class ToolFile {
-    /** 主键 ID */
     @Id
-    private String id;
+    @org.springframework.data.annotation.Transient
+    private UUID id;
     
     /** 文件名称（如 image_0.jpg） */
     private String name;
