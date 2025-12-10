@@ -96,6 +96,7 @@ public class VlmClient {
         // 拼接上下文到 Prompt
         String configPrompt = vlmConfig.getPrompt();
         String finalPrompt = String.format("结合图片周围的上下文文本：【%s】，%s", context, configPrompt);
+        log.debug("VLM理解Prompt: {}", finalPrompt);
         
         // 构建请求体
         String requestBody = buildVisionRequest(imageData, finalPrompt, provider);

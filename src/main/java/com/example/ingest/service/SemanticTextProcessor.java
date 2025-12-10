@@ -28,6 +28,7 @@ import java.util.regex.Pattern;
 public class SemanticTextProcessor {
     
     private final AppProperties appProperties;
+    private final VlmClient vlmClient;
     
     // Markdown 标题正则：匹配 # 开头的标题
     private static final Pattern HEADER_PATTERN = Pattern.compile("^(#{1,6})\\s+(.+)$", Pattern.MULTILINE);
@@ -38,29 +39,24 @@ public class SemanticTextProcessor {
     /**
      * 语义增强主流程
      * 
-     * 执行顺序：
-     * 1. VLM 图片增强（如果启用）
-     * 2. 层级结构深度处理（如果启用标题处理）
-     *    - 格式转换：# 标题 → {{>1#}}，段落 → {{>2#}}
-     *    - 上下文注入：{{>2#}} 子标题 → {{>2#}} (所属章节: 父标题) 子标题
-     *    - 递归预切分：超长子段智能切分，保持上下文一致性
-     * 
      * @param markdown 原始 Markdown 文本
-     * @param imageAnalysisResults VLM 图片分析结果（可选，用于增强图片描述）
-     * @param enableHeaderProcessing 是否启用标题处理（AUTO 模式 + hierarchical_model 时为 true）
+     * @param imageUrls 图片 URL 列表（用于 VLM 分析）
+     * @param enableVlm 是否启用 VLM 图片分析
+     * @param enableHeaderProcessing 是否启用标题处理
      * @return 增强后的 Markdown 文本
      */
-    public String enrichMarkdown(String markdown, Map<String, VlmClient.ImageAnalysisResult> imageAnalysisResults, boolean enableHeaderProcessing) {
-        log.info("开始语义增强处理，原始文本长度: {}, 启用标题处理: {}", markdown.length(), enableHeaderProcessing);
+    public String enrichMarkdown(String markdown, Map<String, String> imageUrls, boolean enableVlm, boolean enableHeaderProcessing) {
+        log.info("开始语义增强处理，原始文本长度: {}, 启用 VLM: {}, 启用标题处理: {}", 
+                markdown.length(), enableVlm, enableHeaderProcessing);
         
         String enrichedMarkdown = markdown;
         
-        // 1. 增强图片描述（如果启用了 VLM）
-        if (imageAnalysisResults != null && !imageAnalysisResults.isEmpty()) {
-            enrichedMarkdown = enrichImageDescriptions(enrichedMarkdown, imageAnalysisResults);
+        // 1. VLM 图片增强（在此处提取上下文并调用 VLM）
+        if (enableVlm && imageUrls != null && !imageUrls.isEmpty()) {
+            enrichedMarkdown = enrichImageDescriptionsWithVlm(enrichedMarkdown);
         }
         
-        // 2. 层级结构深度处理（格式转换 + 上下文注入 + 递归预切分）
+        // 2. 层级结构处理
         if (enableHeaderProcessing) {
             enrichedMarkdown = processHierarchicalStructure(enrichedMarkdown);
         }
@@ -69,12 +65,7 @@ public class SemanticTextProcessor {
         return enrichedMarkdown;
     }
     
-    /**
-     * 兼容旧版本的方法（默认不使用默认分段）
-     */
-    public String enrichMarkdown(String markdown, Map<String, VlmClient.ImageAnalysisResult> imageAnalysisResults) {
-        return enrichMarkdown(markdown, imageAnalysisResults, false);
-    }
+
 
     /**
      * 格式转换：将标准 Markdown 转换为 Dify 父子分段格式
@@ -118,7 +109,7 @@ public class SemanticTextProcessor {
             // 检测一级标题
             if (trimmed.startsWith("# ") && !trimmed.startsWith("##")) {
                 // 先输出之前的段落
-                if (paragraphBuffer.length() > 0) {
+                if (!paragraphBuffer.isEmpty()) {
                     result.append(subSeparator).append(" ").append(paragraphBuffer.toString().trim()).append("\n\n");
                     paragraphBuffer.setLength(0);
                     inParagraph = false;
@@ -130,7 +121,7 @@ public class SemanticTextProcessor {
             }
             // 空行：段落分隔符
             else if (trimmed.isEmpty()) {
-                if (inParagraph && paragraphBuffer.length() > 0) {
+                if (inParagraph && !paragraphBuffer.isEmpty()) {
                     result.append(subSeparator).append(" ").append(paragraphBuffer.toString().trim()).append("\n\n");
                     paragraphBuffer.setLength(0);
                     inParagraph = false;
@@ -246,39 +237,40 @@ public class SemanticTextProcessor {
     }
 
     /**
-     * 增强图片描述
-     * 
-     * 使用 VLM（视觉语言模型）分析结果增强 Markdown 图片的 alt 文本
-     * 
-     * 转换规则：
-     * ![](url) → ![VLM语义描述 | 文字: OCR提取内容](url)
-     * 
-     * @param markdown Markdown 文本
-     * @param analysisResults VLM 图片分析结果（key: 图片 URL, value: 分析结果）
-     * @return 增强后的 Markdown 文本
+     * VLM 图片增强：提取上下文并调用 VLM 分析
      */
-    private String enrichImageDescriptions(String markdown, Map<String, VlmClient.ImageAnalysisResult> analysisResults) {
+    private String enrichImageDescriptionsWithVlm(String markdown) {
         Matcher matcher = IMAGE_PATTERN.matcher(markdown);
-        StringBuffer result = new StringBuffer();
+        StringBuilder result = new StringBuilder();
         
         while (matcher.find()) {
-            String originalAlt = matcher.group(1);
             String imageUrl = matcher.group(2);
             
-            // 直接使用完整 URL 作为 key 查找分析结果
-            VlmClient.ImageAnalysisResult analysis = analysisResults.get(imageUrl);
+            // 提取图片周围上下文（前后各30字符）
+            int start = matcher.start();
+            int end = matcher.end();
+            String beforeContext = markdown.substring(Math.max(0, start - 30), start).replace("\n", " ").trim();
+            String afterContext = markdown.substring(end, Math.min(markdown.length(), end + 30)).replace("\n", " ").trim();
+            String context = String.format("图片前部分文本：%s | 图片后部分文本：%s", beforeContext, afterContext);
             
-            if (analysis != null && analysis.isSuccess()) {
-                // 构建增强的 alt 文本
-                String enrichedAlt = buildEnrichedAlt(analysis);
-                String replacement = "![" + enrichedAlt + "](" + imageUrl + ")";
-                matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
-                
-                log.debug("增强图片描述: {} -> {}", imageUrl, enrichedAlt.substring(0, Math.min(50, enrichedAlt.length())));
-            } else {
-                // 保持原样
+            // 调用 VLM 分析（设置超时）
+            try {
+                VlmClient.ImageAnalysisResult analysis = vlmClient.analyzeImageAsync(imageUrl, imageUrl, context)
+                        .get(30, java.util.concurrent.TimeUnit.SECONDS);
+                if (analysis.isSuccess()) {
+                    String enrichedAlt = buildEnrichedAlt(analysis);
+                    String replacement = "![" + enrichedAlt + "](" + imageUrl + ")";
+                    matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+                    log.debug("VLM 增强完成: {}", imageUrl);
+                } else {
+                    matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
+                }
+            } catch (java.util.concurrent.TimeoutException e) {
+                log.warn("VLM 分析超时: {}", imageUrl);
                 matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
-                log.debug("未找到图片分析结果，保持原样: {}", imageUrl);
+            } catch (Exception e) {
+                log.error("VLM 分析失败: {}", imageUrl, e);
+                matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
             }
         }
         
@@ -286,33 +278,10 @@ public class SemanticTextProcessor {
         return result.toString();
     }
 
-    /**
-     * 从 URL 中提取图片名称
-     * 
-     * @param imageUrl 图片 URL
-     * @return 图片文件名（URL 最后一段）
-     */
-    private String extractImageName(String imageUrl) {
-        // 从 URL 中提取最后一段作为文件名
-        // 例如: http://minio/bucket/image_0.jpg -> image_0.jpg
-        int lastSlash = imageUrl.lastIndexOf('/');
-        if (lastSlash >= 0 && lastSlash < imageUrl.length() - 1) {
-            return imageUrl.substring(lastSlash + 1);
-        }
-        return imageUrl;
-    }
+
 
     /**
-     * 构建增强的 alt 文本
-     * 
-     * 格式：VLM语义描述 | 文字: OCR提取内容
-     * 
-     * 长度限制：
-     * - 描述：200 字符
-     * - OCR：300 字符
-     * 
-     * @param analysis VLM 图片分析结果
-     * @return 增强的 alt 文本
+     * 构建增强的 alt 文本：格式为 "描述 | 文字: OCR内容"
      */
     private String buildEnrichedAlt(VlmClient.ImageAnalysisResult analysis) {
         StringBuilder alt = new StringBuilder();
@@ -346,16 +315,7 @@ public class SemanticTextProcessor {
     }
 
     /**
-     * 清理 OCR 文本中的噪音
-     * 
-     * 移除常见的噪音模式：
-     * - HTTP 请求日志
-     * - GIN/nginx/sandbox 日志
-     * - 长 token 字符串
-     * - 多余空行
-     * 
-     * @param ocrText 原始 OCR 文本
-     * @return 清理后的 OCR 文本
+     * 清理 OCR 文本噪音
      */
     private String cleanOcrText(String ocrText) {
         if (ocrText == null || ocrText.isEmpty()) {

@@ -50,6 +50,11 @@
         @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" />
         <el-table-column prop="fileName" label="文件名" min-width="200" />
+        <el-table-column prop="fileSize" label="文件大小" width="120">
+          <template #default="{ row }">
+            {{ formatFileSize(row.fileSize) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="datasetId" label="知识库 ID" width="180" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
@@ -211,6 +216,14 @@ const getStatusText = (status) => {
     FAILED: '失败'
   }
   return map[status] || status
+}
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return '-'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB'
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'
 }
 
 const formatTime = (time) => {

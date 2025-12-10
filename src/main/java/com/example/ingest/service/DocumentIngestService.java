@@ -75,8 +75,10 @@ public class DocumentIngestService {
                     String.format("indexingTechnique=%s, docForm=%s", 
                             dataset.getIndexingTechnique(), dataset.getDocForm()));
 
-            // 2. 下载文件
+            // 2. 下载文件并记录大小
             File downloadedFile = downloadFile(request.getFileUrl(), request.getFileName());
+            long fileSize = downloadedFile.length();
+            logInfo(taskId, "文件下载完成", String.format("大小: %d bytes", fileSize));
             
             // 3. 格式转换
             File pdfFile = convertToPdfIfNeeded(downloadedFile, request.getFileType());
@@ -103,9 +105,9 @@ public class DocumentIngestService {
             // 6. 处理图片：替换 markdown 中的临时路径为真实 MinIO URL
             String markdownWithRealUrls = replaceImagePaths(mdContent, images, taskId);
             
-            // 7. 语义增强处理（记录 VLM 耗时）
+            // 7. 语义增强处理
             long vlmStartTime = System.currentTimeMillis();
-            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, images, request.getEnableVlm(), request, dataset);
+            String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, getImageRealUrls(images), request.getEnableVlm(), dataset);
             vlmCostTime = System.currentTimeMillis() - vlmStartTime;
             
             // 8. 调用 Dify API 写入知识库
@@ -118,7 +120,7 @@ public class DocumentIngestService {
             // 10. 返回结果
             long totalCostTime = System.currentTimeMillis() - totalStartTime;
             
-            return IngestResponse.builder()
+            IngestResponse response = IngestResponse.builder()
                     .success(true)
                     .fileIds(Collections.singletonList(difyResponse.getDocument().getId()))
                     .stats(IngestResponse.Stats.builder()
@@ -127,7 +129,10 @@ public class DocumentIngestService {
                             .build())
                     .vlmCostTime(vlmCostTime)
                     .totalCostTime(totalCostTime)
+                    .fileSize(fileSize)
                     .build();
+            
+            return response;
                     
         } catch (Exception e) {
             log.error("文档入库失败", e);
@@ -287,60 +292,14 @@ public class DocumentIngestService {
     }
 
     /**
-     * 语义增强处理（VLM 图片分析）
+     * 语义增强处理
      */
-    private String performSemanticEnrichment(String markdown, Map<String, String> images, Boolean enableVlm, IngestRequest request, DifyDatasetDetail dataset) {
-        Map<String, VlmClient.ImageAnalysisResult> analysisResults = null;
-        
-        if (Boolean.TRUE.equals(enableVlm) && images != null && !images.isEmpty()) {
-            log.info("启用 VLM 图片分析，共 {} 张图片", images.size());
-            analysisResults = analyzeImagesWithVlm(images);
-        }
-        
-        // 判断是否进行标题处理：仅在 AUTO 模式 + 父子分段时
-        boolean isAutoMode = request.getChunkingMode() == null || 
-                             request.getChunkingMode().isEmpty() || 
-                             "AUTO".equalsIgnoreCase(request.getChunkingMode());
-        
-        String docForm = dataset.getDocForm();
-        if (docForm == null) {
-            docForm = appProperties.getDefaultConfig().getDocForm();
-        }
-        
-        boolean enableHeaderProcessing = isAutoMode && "hierarchical_model".equalsIgnoreCase(docForm);
-        
-        return semanticTextProcessor.enrichMarkdown(markdown, analysisResults, enableHeaderProcessing);
+    private String performSemanticEnrichment(String markdown, Map<String, String> imageUrls, Boolean enableVlm, DifyDatasetDetail dataset) {
+        boolean enableHeaderProcessing = "hierarchical_model".equalsIgnoreCase(dataset.getDocForm());
+        return semanticTextProcessor.enrichMarkdown(markdown, imageUrls, Boolean.TRUE.equals(enableVlm), enableHeaderProcessing);
     }
 
-    /**
-     * 使用 VLM 批量分析图片
-     */
-    private Map<String, VlmClient.ImageAnalysisResult> analyzeImagesWithVlm(Map<String, String> images) {
-        List<java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult>> futures = new ArrayList<>();
-        Map<String, String> imageUrls = getImageRealUrls(images);
-        
-        for (Map.Entry<String, String> entry : imageUrls.entrySet()) {
-            String imageName = entry.getKey();
-            String imageUrl = entry.getValue();
-            // 传入空上下文，实际上下文在 enrichImageDescriptions 中提取
-            futures.add(vlmClient.analyzeImageAsync(imageUrl, imageUrl, ""));
-        }
-        
-        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
-        
-        Map<String, VlmClient.ImageAnalysisResult> results = new HashMap<>();
-        for (java.util.concurrent.CompletableFuture<VlmClient.ImageAnalysisResult> future : futures) {
-            try {
-                VlmClient.ImageAnalysisResult result = future.get();
-                results.put(result.getImageName(), result);
-            } catch (Exception e) {
-                log.error("获取 VLM 分析结果失败", e);
-            }
-        }
-        
-        log.info("VLM 分析完成，成功 {} 张", results.size());
-        return results;
-    }
+
 
     /**
      * 查询图片真实 URL

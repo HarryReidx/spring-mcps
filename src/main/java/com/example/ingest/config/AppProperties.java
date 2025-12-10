@@ -181,7 +181,7 @@ public class AppProperties {
         private Integer maxTokens = 1000;
 
         /** 提示词 */
-        private String prompt = "请详细描述这张图片的内容，并提取其中的所有文字。格式：描述: [图片描述]\nOCR: [提取的文字]";
+        private String prompt = "请结合图片前后的文本上下文，简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: [简要描述]\nOCR: [关键文字]";
     }
     
     /**

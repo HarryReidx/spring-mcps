@@ -239,6 +239,48 @@ process-rule:
 
 ---
 
+# 功能新增：文件大小记录与 VLM 失败追踪
+
+**日期**: 2025-12-09
+
+**新增功能**:
+1. 记录原始文件大小到任务表
+2. 追踪 VLM 分析失败的图片 URL
+3. 前端任务列表显示文件大小列
+4. VLM 分析超时优化（30秒）
+
+### 数据库变更：`sql/003_add_file_size_and_vlm_errors.sql`
+
+```sql
+ALTER TABLE ingest_tasks 
+ADD COLUMN file_size BIGINT,
+ADD COLUMN vlm_failed_images TEXT;
+```
+
+### 修改文件：`src/main/java/com/example/ingest/entity/IngestTask.java`
+
+```java
+@Column("file_size")
+private Long fileSize;
+
+@Column("vlm_failed_images")
+private String vlmFailedImages;  // JSON 数组
+```
+
+### 修改文件：`frontend/src/views/TaskList.vue`
+
+```vue
+<el-table-column prop="fileSize" label="文件大小" width="120">
+  <template #default="{ row }">
+    {{ formatFileSize(row.fileSize) }}
+  </template>
+</el-table-column>
+```
+
+**影响**: 任务监控页面可查看文件大小，便于分析大文件处理性能
+
+---
+
 # 优化记录：超时调整与 VLM 上下文增强
 
 **日期**: 2025-12-05

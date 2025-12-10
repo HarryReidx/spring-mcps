@@ -30,6 +30,10 @@ public class IngestResponse {
     private Long vlmCostTime;
     
     private Long totalCostTime;
+    
+    private Long fileSize;
+    
+    private List<String> vlmFailedImages;
 
     @Data
     @Builder

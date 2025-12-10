@@ -75,6 +75,12 @@ public class IngestTask {
     @Column("total_cost_time")
     private Long totalCostTime;  // 总耗时（毫秒）
     
+    @Column("file_size")
+    private Long fileSize;  // 文件大小（字节）
+    
+    @Column("vlm_failed_images")
+    private String vlmFailedImages;  // VLM 失败图片 URL（JSON 数组）
+    
     /**
      * 任务状态枚举
      */
