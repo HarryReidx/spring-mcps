@@ -110,6 +110,12 @@ public class DocumentIngestService {
             String finalMarkdown = performSemanticEnrichment(markdownWithRealUrls, getImageRealUrls(images), request.getEnableVlm(), dataset);
             vlmCostTime = System.currentTimeMillis() - vlmStartTime;
             
+            // 7.1 收集 VLM 失败图片
+            List<String> vlmFailedImages = semanticTextProcessor.getVlmFailedImages();
+            if (!vlmFailedImages.isEmpty()) {
+                logWarn(taskId, "VLM 分析失败", String.format("失败图片数: %d", vlmFailedImages.size()));
+            }
+            
             // 8. 调用 Dify API 写入知识库
             DifyCreateDocumentRequest difyRequest = buildDifyRequest(request, finalMarkdown, dataset);
             DifyCreateDocumentResponse difyResponse = difyClient.createDocument(request.getDatasetId(), difyRequest);
@@ -130,6 +136,7 @@ public class DocumentIngestService {
                     .vlmCostTime(vlmCostTime)
                     .totalCostTime(totalCostTime)
                     .fileSize(fileSize)
+                    .vlmFailedImages(vlmFailedImages)
                     .build();
             
             return response;

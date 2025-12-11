@@ -49,7 +49,16 @@
         stripe
         @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="fileName" label="文件名" min-width="200" />
+        <el-table-column prop="fileName" label="文件名" min-width="200">
+          <template #default="{ row }">
+            <div>
+              {{ row.fileName }}
+              <el-tooltip v-if="hasVlmFailures(row)" content="部分图片 VLM 分析失败" placement="top">
+                <el-icon color="#E6A23C" style="margin-left: 5px"><Warning /></el-icon>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="fileSize" label="文件大小" width="120">
           <template #default="{ row }">
             {{ formatFileSize(row.fileSize) }}
@@ -78,17 +87,17 @@
         </el-table-column>
         <el-table-column prop="createdAt" label="创建时间" width="180">
           <template #default="{ row }">
-            {{ formatTime(row.createdAt) }}
+            {{ formatDateTime(row.createdAt) }}
           </template>
         </el-table-column>
         <el-table-column label="VLM耗时" width="100">
           <template #default="{ row }">
-            {{ row.vlmCostTime ? row.vlmCostTime + 'ms' : '-' }}
+            {{ formatTime(row.vlmCostTime) }}
           </template>
         </el-table-column>
         <el-table-column label="总耗时" width="100">
           <template #default="{ row }">
-            {{ row.totalCostTime ? row.totalCostTime + 'ms' : '-' }}
+            {{ formatTime(row.totalCostTime) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
@@ -226,17 +235,25 @@ const formatFileSize = (bytes) => {
   return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'
 }
 
-const formatTime = (time) => {
+const formatTime = (ms) => {
+  if (!ms) return '-'
+  const seconds = ms / 1000
+  return seconds < 1 ? seconds.toFixed(2) + ' s' : seconds.toFixed(1) + ' s'
+}
+
+const formatDateTime = (time) => {
   if (!time) return '-'
   return new Date(time).toLocaleString('zh-CN')
 }
 
-const getDuration = (task) => {
-  if (!task.startTime || !task.endTime) return '-'
-  const start = new Date(task.startTime)
-  const end = new Date(task.endTime)
-  const seconds = Math.floor((end - start) / 1000)
-  return `${seconds}s`
+const hasVlmFailures = (task) => {
+  if (!task.vlmFailedImages) return false
+  try {
+    const failedImages = JSON.parse(task.vlmFailedImages)
+    return Array.isArray(failedImages) && failedImages.length > 0
+  } catch {
+    return false
+  }
 }
 
 onMounted(() => {

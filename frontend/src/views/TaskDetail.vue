@@ -37,10 +37,10 @@
             {{ formatTime(task.endTime) }}
           </el-descriptions-item>
           <el-descriptions-item label="VLM 耗时">
-            {{ task.vlmCostTime ? task.vlmCostTime + 'ms' : '-' }}
+            {{ formatDuration(task.vlmCostTime) }}
           </el-descriptions-item>
           <el-descriptions-item label="总耗时">
-            {{ task.totalCostTime ? task.totalCostTime + 'ms' : '-' }}
+            {{ formatDuration(task.totalCostTime) }}
           </el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -61,6 +61,24 @@
             {{ getSummaryValue('vlmDuration') }}ms
           </el-descriptions-item>
         </el-descriptions>
+      </el-card>
+      
+      <!-- VLM 失败图片 -->
+      <el-card v-if="vlmFailedImages.length > 0" class="vlm-failed-card">
+        <template #header>
+          <div class="vlm-failed-header">
+            <span>VLM 分析失败图片 ({{ vlmFailedImages.length }})</span>
+            <el-tag type="warning" size="small">部分图片未能完成分析</el-tag>
+          </div>
+        </template>
+        <el-table :data="vlmFailedImages" stripe max-height="300">
+          <el-table-column type="index" label="#" width="60" />
+          <el-table-column prop="url" label="图片 URL" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-link :href="row" target="_blank" type="primary">{{ row }}</el-link>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-card>
       
       <!-- 错误信息 -->
@@ -149,11 +167,21 @@ hljs.registerLanguage('markdown', markdown)
 const route = useRoute()
 const task = ref(null)
 const logs = ref([])
+const vlmFailedImages = ref([])
 
 const loadTask = async () => {
   try {
     const { data } = await taskApi.getTask(route.params.id)
     task.value = data
+    
+    // 解析 VLM 失败图片
+    if (data.vlmFailedImages) {
+      try {
+        vlmFailedImages.value = JSON.parse(data.vlmFailedImages)
+      } catch {
+        vlmFailedImages.value = []
+      }
+    }
   } catch (error) {
     ElMessage.error('加载任务详情失败')
   }
@@ -214,12 +242,10 @@ const formatTime = (time) => {
   return new Date(time).toLocaleString('zh-CN')
 }
 
-const getDuration = (task) => {
-  if (!task.startTime || !task.endTime) return '-'
-  const start = new Date(task.startTime)
-  const end = new Date(task.endTime)
-  const seconds = Math.floor((end - start) / 1000)
-  return `${seconds}s`
+const formatDuration = (ms) => {
+  if (!ms) return '-'
+  const seconds = ms / 1000
+  return seconds < 1 ? seconds.toFixed(2) + ' s' : seconds.toFixed(1) + ' s'
 }
 
 const getLogLevelType = (level) => {
@@ -254,11 +280,18 @@ onMounted(() => {
 
 .info-card,
 .result-card,
+.vlm-failed-card,
 .error-card,
 .markdown-card,
 .logs-card,
 .link-card {
   margin-bottom: 20px;
+}
+
+.vlm-failed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .logs-header {

@@ -182,6 +182,16 @@ public class IngestTaskService {
             task.setEndTime(LocalDateTime.now());
             task.setVlmCostTime(response.getVlmCostTime());
             task.setTotalCostTime(response.getTotalCostTime());
+            task.setFileSize(response.getFileSize());
+            
+            // 保存 VLM 失败图片列表
+            if (response.getVlmFailedImages() != null && !response.getVlmFailedImages().isEmpty()) {
+                try {
+                    task.setVlmFailedImages(objectMapper.writeValueAsString(response.getVlmFailedImages()));
+                } catch (Exception e) {
+                    log.error("序列化 VLM 失败图片列表失败", e);
+                }
+            }
             
             // 构建结果摘要
             Map<String, Object> summary = new HashMap<>();

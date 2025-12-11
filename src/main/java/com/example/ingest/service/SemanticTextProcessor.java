@@ -36,6 +36,8 @@ public class SemanticTextProcessor {
     // Markdown 图片正则：匹配 ![alt](url)
     private static final Pattern IMAGE_PATTERN = Pattern.compile("!\\[([^\\]]*)\\]\\(([^)]+)\\)");
 
+    private final List<String> vlmFailedImages = new ArrayList<>();
+    
     /**
      * 语义增强主流程
      * 
@@ -49,6 +51,7 @@ public class SemanticTextProcessor {
         log.info("开始语义增强处理，原始文本长度: {}, 启用 VLM: {}, 启用标题处理: {}", 
                 markdown.length(), enableVlm, enableHeaderProcessing);
         
+        vlmFailedImages.clear();
         String enrichedMarkdown = markdown;
         
         // 1. VLM 图片增强（在此处提取上下文并调用 VLM）
@@ -61,8 +64,12 @@ public class SemanticTextProcessor {
             enrichedMarkdown = processHierarchicalStructure(enrichedMarkdown);
         }
         
-        log.info("语义增强完成，增强后文本长度: {}", enrichedMarkdown.length());
+        log.info("语义增强完成，增强后文本长度: {}, VLM 失败图片数: {}", enrichedMarkdown.length(), vlmFailedImages.size());
         return enrichedMarkdown;
+    }
+    
+    public List<String> getVlmFailedImages() {
+        return new ArrayList<>(vlmFailedImages);
     }
     
 
@@ -263,13 +270,16 @@ public class SemanticTextProcessor {
                     matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
                     log.debug("VLM 增强完成: {}", imageUrl);
                 } else {
+                    vlmFailedImages.add(imageUrl);
                     matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
                 }
             } catch (java.util.concurrent.TimeoutException e) {
                 log.warn("VLM 分析超时: {}", imageUrl);
+                vlmFailedImages.add(imageUrl);
                 matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
             } catch (Exception e) {
                 log.error("VLM 分析失败: {}", imageUrl, e);
+                vlmFailedImages.add(imageUrl);
                 matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
             }
         }

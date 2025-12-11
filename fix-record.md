@@ -241,24 +241,26 @@ process-rule:
 
 # 功能新增：文件大小记录与 VLM 失败追踪
 
-**日期**: 2025-12-09
+**日期**: 2025-12-11
 
 **新增功能**:
 1. 记录原始文件大小到任务表
 2. 追踪 VLM 分析失败的图片 URL
 3. 前端任务列表显示文件大小列
 4. VLM 分析超时优化（30秒）
+5. 前端耗时列格式化（毫秒转秒）
 
 ### 数据库变更：`sql/003_add_file_size_and_vlm_errors.sql`
 
 ```sql
-ALTER TABLE ingest_tasks 
+ALTER TABLE mcp_ingest_tasks 
 ADD COLUMN file_size BIGINT,
 ADD COLUMN vlm_failed_images TEXT;
 ```
 
-### 修改文件：`src/main/java/com/example/ingest/entity/IngestTask.java`
+### 后端修改
 
+**`src/main/java/com/example/ingest/entity/IngestTask.java`**
 ```java
 @Column("file_size")
 private Long fileSize;
@@ -267,17 +269,33 @@ private Long fileSize;
 private String vlmFailedImages;  // JSON 数组
 ```
 
-### 修改文件：`frontend/src/views/TaskList.vue`
+**`src/main/java/com/example/ingest/service/SemanticTextProcessor.java`**
+- 添加 `vlmFailedImages` 列表收集失败图片
+- 在 VLM 分析失败、超时或返回失败时记录图片 URL
+- 提供 `getVlmFailedImages()` 方法供外部获取
 
-```vue
-<el-table-column prop="fileSize" label="文件大小" width="120">
-  <template #default="{ row }">
-    {{ formatFileSize(row.fileSize) }}
-  </template>
-</el-table-column>
-```
+**`src/main/java/com/example/ingest/service/DocumentIngestService.java`**
+- 在语义增强后调用 `semanticTextProcessor.getVlmFailedImages()` 获取失败图片
+- 将失败图片列表传递到 `IngestResponse`
 
-**影响**: 任务监控页面可查看文件大小，便于分析大文件处理性能
+**`src/main/java/com/example/ingest/service/IngestTaskService.java`**
+- 在 `updateTaskSuccess` 中保存 VLM 失败图片列表到数据库
+
+### 前端修改
+
+**`frontend/src/views/TaskList.vue`**
+- 添加文件大小列，使用 `formatFileSize` 格式化
+- 修改耗时列格式化：毫秒转秒（< 1s 显示 0.xx s，>= 1s 显示 x.x s）
+- 分离 `formatTime` (耗时) 和 `formatDateTime` (时间戳)
+
+**`frontend/src/views/TaskDetail.vue`**
+- 修改耗时显示格式化：使用 `formatDuration` 方法
+- 统一耗时格式：毫秒转秒
+
+**影响**: 
+- 任务监控页面可查看文件大小和 VLM 失败图片数
+- 耗时显示更友好（秒为单位）
+- 便于分析大文件处理性能和 VLM 失败原因
 
 ---
 
@@ -422,31 +440,36 @@ private Map<String, VlmClient.ImageAnalysisResult> analyzeImagesWithVlm(Map<Stri
 
 ---
 
-# Bug 修复：大文档图片上传失败兜底处理
+# 重构：图片存储独立表
 
 **日期**: 2025-12-09
 
-**问题**: 184MB PDF 包含 702 张图片时，MinerU 服务端上传图片到 MinIO 失败（可能超时），导致 `tool_files` 表无记录，VLM 分析失败
+**问题**: 图片记录与 Dify 的 `tool_files` 表耦合，导致字段冲突和维护困难
 
-**解决方案**: 添加兜底逻辑，当图片数量 > 100 且数据库无记录时，移除图片引用，仅保留文本内容
+**解决方案**: 创建独立的 `mcp_ingest_images` 表，包含创建时间和更新时间字段
 
-### 修改文件：`src/main/java/com/example/ingest/service/DocumentIngestService.java`
+### 新增文件：`sql/004_create_ingest_images_table.sql`
 
-```java
-log.info("从数据库查询到 {} 条图片记录", toolFiles.size());
-
-// 如果图片数量过多且数据库记录为空，说明 MinerU 服务端上传失败
-if (imageNames.size() > 100 && toolFiles.isEmpty()) {
-    logWarn(taskId, "图片上传失败", 
-        String.format("MinerU 返回 %d 张图片，但数据库无记录，可能是服务端上传超时。将移除图片引用，仅保留文本内容。", imageNames.size()));
-    
-    // 移除 Markdown 中的所有图片引用
-    result = result.replaceAll("!\\[.*?\\]\\(images/.*?\\)", "[图片已移除]");
-    return result;
-}
+```sql
+CREATE TABLE IF NOT EXISTS mcp_ingest_images (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    file_key VARCHAR(500) NOT NULL,
+    minio_url VARCHAR(1000) NOT NULL,
+    size BIGINT NOT NULL,
+    mimetype VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
 ```
 
-**影响**: 大文档（>100 张图片）上传失败时，自动降级为纯文本模式，避免入库失败
+### 修改文件：
+- `src/main/java/com/example/ingest/entity/IngestImage.java` - 新增实体
+- `src/main/java/com/example/ingest/repository/IngestImageRepository.java` - 新增仓储
+- `src/main/java/com/example/ingest/service/DocumentIngestService.java` - 替换 `ToolFileRepository` 为 `IngestImageRepository`
+- `src/main/java/com/example/ingest/service/MinioService.java` - 使用新表保存图片记录
+
+**影响**: 图片存储与 Dify 解耦，支持独立维护和扩展
 
 
 ---
