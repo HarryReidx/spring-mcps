@@ -85,6 +85,17 @@ app:
     max-tokens: 10000                                                      # 最大 token 数
     prompt: "请简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: （简要描述） OCR: （关键文字）"
 
+  # LLM 文本摘要配置（用于父文档检索增强）
+  llm:
+    enabled: ${LLM_ENABLED:true}                                          # 是否启用摘要增强
+    provider: ${LLM_PROVIDER:ollama}                                       # 提供商: openai, ollama
+    base-url: ${LLM_BASE_URL:http://172.24.0.5:11434/api/chat}            # LLM API 地址
+    api-key: ${LLM_API_KEY:}                                               # LLM API 密钥（Ollama 不需要）
+    model: ${LLM_MODEL:qwen3:1.7b}                                         # 模型名称
+    max-tokens: 5000                                                        # 最大 token 数
+    prompt: "请总结以下段落的是什么、作用是什么和关键名词，生成一段 150 字左右的摘要，作为检索索引使用。"
+    content-threshold: 100                                                 # 内容长度阈值（字符数）
+
   # 调试配置
   debug:
     save-md: true  # 是否保存 MinerU 解析后的 Markdown 文件到本地 temp 目录

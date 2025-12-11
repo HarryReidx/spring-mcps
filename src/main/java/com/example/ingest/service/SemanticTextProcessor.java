@@ -1,5 +1,6 @@
 package com.example.ingest.service;
 
+import com.example.ingest.client.LlmClient;
 import com.example.ingest.client.VlmClient;
 import com.example.ingest.config.AppProperties;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +11,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 语义文本处理器
@@ -29,6 +31,7 @@ public class SemanticTextProcessor {
     
     private final AppProperties appProperties;
     private final VlmClient vlmClient;
+    private final LlmClient llmClient;
     
     // Markdown 标题正则：匹配 # 开头的标题
     private static final Pattern HEADER_PATTERN = Pattern.compile("^(#{1,6})\\s+(.+)$", Pattern.MULTILINE);
@@ -59,7 +62,12 @@ public class SemanticTextProcessor {
             enrichedMarkdown = enrichImageDescriptionsWithVlm(enrichedMarkdown);
         }
         
-        // 2. 层级结构处理
+        // 2. LLM 摘要增强（在层级结构处理之前）
+        if (appProperties.getLlm().getEnabled()) {
+            enrichedMarkdown = enrichParentWithSummary(enrichedMarkdown);
+        }
+        
+        // 3. 层级结构处理
         if (enableHeaderProcessing) {
             enrichedMarkdown = processHierarchicalStructure(enrichedMarkdown);
         }
@@ -80,20 +88,17 @@ public class SemanticTextProcessor {
      * 转换规则：
      * - # 一级标题 → {{>1#}} 父段
      * - 标题下的段落 → {{>2#}} 子段
-     * - 空行作为段落分隔符
+     * - 如果标题后有 "> 摘要：xxx"，追加到父段同一行
      * 
      * 示例：
      * # 技术架构
+     * > 摘要：本章介绍...
      * 
      * 服务发现模块负责...
-     * 
-     * 配置中心负责...
      * ↓
-     * {{>1#}} 技术架构
+     * {{>1#}} 技术架构 摘要：本章介绍...
      * 
      * {{>2#}} 服务发现模块负责...
-     * 
-     * {{>2#}} 配置中心负责...
      * 
      * @param markdown 原始 Markdown 文本
      * @return 格式转换后的 Markdown 文本
@@ -108,9 +113,11 @@ public class SemanticTextProcessor {
         String[] lines = markdown.split("\n", -1);
         
         boolean inParagraph = false;
+        String pendingParentLine = null;
         StringBuilder paragraphBuffer = new StringBuilder();
         
-        for (String line : lines) {
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
             String trimmed = line.trim();
             
             // 检测一级标题
@@ -122,9 +129,14 @@ public class SemanticTextProcessor {
                     inParagraph = false;
                 }
                 
-                // 输出父段标题
+                // 输出之前待定的父段
+                if (pendingParentLine != null) {
+                    result.append(pendingParentLine).append("\n\n");
+                }
+                
+                // 构建父段标题（标题中可能已包含 "摘要：xxx"）
                 String title = trimmed.substring(2).trim();
-                result.append(parentSeparator).append(" ").append(title).append("\n\n");
+                pendingParentLine = parentSeparator + " " + title;
             }
             // 空行：段落分隔符
             else if (trimmed.isEmpty()) {
@@ -132,13 +144,18 @@ public class SemanticTextProcessor {
                     result.append(subSeparator).append(" ").append(paragraphBuffer.toString().trim()).append("\n\n");
                     paragraphBuffer.setLength(0);
                     inParagraph = false;
-                } else if (!inParagraph) {
-                    // 连续空行，保持一个
+                } else if (!inParagraph && pendingParentLine == null) {
                     result.append("\n");
                 }
             }
             // 普通文本行：累积到段落缓冲区
             else {
+                // 输出待定的父段
+                if (pendingParentLine != null) {
+                    result.append(pendingParentLine).append("\n\n");
+                    pendingParentLine = null;
+                }
+                
                 if (!inParagraph) {
                     inParagraph = true;
                 }
@@ -147,6 +164,11 @@ public class SemanticTextProcessor {
                 }
                 paragraphBuffer.append(line);
             }
+        }
+        
+        // 输出待定的父段
+        if (pendingParentLine != null) {
+            result.append(pendingParentLine).append("\n\n");
         }
         
         // 输出最后的段落
@@ -352,12 +374,150 @@ public class SemanticTextProcessor {
     }
 
     /**
+     * 基于摘要的父文档检索增强
+     * 
+     * 策略：直接在标题后追加摘要，使用正则替换
+     */
+    private String enrichParentWithSummary(String markdown) {
+        log.info("开始 LLM 摘要增强处理");
+        long startTime = System.currentTimeMillis();
+        
+        AppProperties.LlmConfig llmConfig = appProperties.getLlm();
+        int contentThreshold = llmConfig.getContentThreshold();
+        
+        // 解析章节结构
+        List<ChapterSection> sections = parseChapterSections(markdown);
+        log.info("解析到 {} 个章节", sections.size());
+        
+        if (sections.isEmpty()) {
+            return markdown;
+        }
+        
+        // 并发生成摘要
+        Map<String, String> summaryMap = new HashMap<>();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        
+        for (ChapterSection section : sections) {
+            if (section.content.length() >= contentThreshold) {
+                futures.add(CompletableFuture.runAsync(() -> {
+                    try {
+                        String fullText = "标题：" + section.title + "\n\n" + section.content.toString() + "/no_think";
+                        String summary = llmClient.summarizeText(fullText);
+                        summary = cleanThinkTags(summary);
+                        
+                        if (!summary.isEmpty()) {
+                            synchronized (summaryMap) {
+                                summaryMap.put(section.title, summary);
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.error("LLM 摘要生成失败: {}", section.title, e);
+                    }
+                }));
+            }
+        }
+        
+        // 等待所有摘要完成
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        
+        // 使用正则替换：在一级标题同一行追加摘要
+        String result = markdown;
+        for (Map.Entry<String, String> entry : summaryMap.entrySet()) {
+            String title = entry.getKey();
+            String summary = entry.getValue();
+            
+            // 转义特殊字符并匹配 "# title"（行尾）
+            String escapedTitle = Pattern.quote(title);
+            Pattern pattern = Pattern.compile("(^# " + escapedTitle + ")\\s*$", Pattern.MULTILINE);
+            Matcher matcher = pattern.matcher(result);
+            
+            if (matcher.find()) {
+                // 直接追加到标题同一行
+                result = matcher.replaceFirst("$1 摘要：" + Matcher.quoteReplacement(summary));
+                log.debug("成功插入摘要到标题: {}", title);
+            } else {
+                log.warn("未找到标题进行摘要插入: {}", title);
+            }
+        }
+        
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("LLM 摘要增强完成，成功生成 {} 个摘要，耗时 {}ms", summaryMap.size(), duration);
+        
+        return result;
+    }
+
+    /**
+     * 清理 LLM 输出中的 <think> 标签
+     */
+    private String cleanThinkTags(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        
+        // 移除 <think>...</think> 及其内容
+        String cleaned = text.replaceAll("<think>.*?</think>", "").trim();
+        
+        // 移除可能残留的单独标签
+        cleaned = cleaned.replaceAll("</?think>", "").trim();
+        
+        return cleaned;
+    }
+
+    /**
+     * 解析章节结构（识别一级标题及其正文内容）
+     */
+    private List<ChapterSection> parseChapterSections(String markdown) {
+        List<ChapterSection> sections = new ArrayList<>();
+        
+        // 使用正则匹配一级标题
+        Pattern h1Pattern = Pattern.compile("^# ([^#\\n].*)$", Pattern.MULTILINE);
+        Matcher matcher = h1Pattern.matcher(markdown);
+        
+        List<Integer> headerPositions = new ArrayList<>();
+        List<String> headerTitles = new ArrayList<>();
+        
+        while (matcher.find()) {
+            headerPositions.add(matcher.start());
+            headerTitles.add(matcher.group(1).trim());
+        }
+        
+        // 提取每个章节的正文内容
+        for (int i = 0; i < headerPositions.size(); i++) {
+            int startPos = headerPositions.get(i);
+            int endPos = (i + 1 < headerPositions.size()) ? headerPositions.get(i + 1) : markdown.length();
+            
+            String title = headerTitles.get(i);
+            String sectionText = markdown.substring(startPos, endPos);
+            
+            // 提取正文（跳过标题行）
+            String[] lines = sectionText.split("\n", -1);
+            StringBuilder content = new StringBuilder();
+            
+            for (int j = 1; j < lines.length; j++) {
+                String line = lines[j].trim();
+                // 排除空行、图片、代码块
+                if (!line.isEmpty() && !line.startsWith("!") && !line.startsWith("```") && !line.startsWith("#")) {
+                    if (content.length() > 0) {
+                        content.append("\n");
+                    }
+                    content.append(lines[j]);
+                }
+            }
+            
+            sections.add(new ChapterSection(title, startPos, content));
+        }
+        
+        return sections;
+    }
+
+    /**
      * 层级结构深度处理
      * 
      * 三步走策略：
      * 1. 格式转换：将标准 Markdown 转换为 Dify 层级分段格式
-     * 2. 上下文注入：为子分段注入父标题上下文
-     * 3. 递归预切分：对超长子段进行智能切分
+     * 2. 摘要注入：将摘要追加到 {{>1#}} 父段之后（如果已生成）
+     * 3. 上下文注入：为子分段注入父标题上下文
+     * 4. 递归预切分：对超长子段进行智能切分
      * 
      * @param markdown 原始 Markdown 文本
      * @return 处理后的 Markdown 文本
@@ -408,7 +568,15 @@ public class SemanticTextProcessor {
             
             // 检测父分段标识
             if (trimmed.startsWith(parentSeparator)) {
-                currentParentTitle = trimmed.substring(parentSeparator.length()).trim();
+                // 提取标题（去掉可能的摘要部分）
+                String fullTitle = trimmed.substring(parentSeparator.length()).trim();
+                // 如果包含 "摘要："，只取摘要之前的部分作为标题
+                int summaryIndex = fullTitle.indexOf("摘要：");
+                if (summaryIndex > 0) {
+                    currentParentTitle = fullTitle.substring(0, summaryIndex).trim();
+                } else {
+                    currentParentTitle = fullTitle;
+                }
                 result.append(line).append("\n");
             }
             // 检测子分段标识，注入父标题
@@ -617,6 +785,36 @@ public class SemanticTextProcessor {
             this.level = level;
             this.title = title;
             this.position = position;
+        }
+    }
+
+    /**
+     * 章节结构（用于摘要增强）
+     */
+    private static class ChapterSection {
+        String title;              // 章节标题
+        int headerPosition;        // 标题在原文中的位置
+        StringBuilder content;     // 章节正文内容
+        
+        ChapterSection(String title, int headerPosition, StringBuilder content) {
+            this.title = title;
+            this.headerPosition = headerPosition;
+            this.content = content;
+        }
+    }
+
+    /**
+     * 摘要结果
+     */
+    private static class SummaryResult {
+        int headerPosition;        // 标题位置
+        String summary;            // 摘要内容
+        boolean success;           // 是否成功
+        
+        SummaryResult(int headerPosition, String summary, boolean success) {
+            this.headerPosition = headerPosition;
+            this.summary = summary;
+            this.success = success;
         }
     }
 }

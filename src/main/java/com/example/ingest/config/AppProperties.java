@@ -32,6 +32,9 @@ public class AppProperties {
     /** VLM 视觉模型配置 */
     private VlmConfig vlm = new VlmConfig();
 
+    /** LLM 文本摘要配置 */
+    private LlmConfig llm = new LlmConfig();
+
     /** 调试配置 */
     private DebugConfig debug = new DebugConfig();
 
@@ -182,6 +185,36 @@ public class AppProperties {
 
         /** 提示词 */
         private String prompt = "请结合图片前后的文本上下文，简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: [简要描述]\nOCR: [关键文字]";
+    }
+
+    /**
+     * LLM 文本摘要配置（用于父文档检索增强）
+     */
+    @Data
+    public static class LlmConfig {
+        /** 是否启用摘要增强 */
+        private Boolean enabled = false;
+
+        /** 提供商类型: openai, ollama */
+        private String provider = "ollama";
+
+        /** API 基础地址 */
+        private String baseUrl = "http://localhost:11434/api/chat";
+
+        /** API 密钥（Ollama 不需要） */
+        private String apiKey;
+
+        /** 模型名称 */
+        private String model = "qwen2.5:7b";
+
+        /** 最大 token 数 */
+        private Integer maxTokens = 500;
+
+        /** 提示词 */
+        private String prompt = "请简要总结以下技术内容的核心要点、关键实体和架构逻辑，字数控制在 150 字以内。";
+
+        /** 内容长度阈值（字符数），低于此值不调用 LLM */
+        private Integer contentThreshold = 100;
     }
     
     /**
