@@ -1,8 +1,7 @@
 package com.example.ingest.service;
 
 import com.example.ingest.config.AppProperties;
-import com.example.ingest.entity.ToolFile;
-import com.example.ingest.repository.ToolFileRepository;
+import com.example.ingest.repository.IngestImageRepository;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +21,7 @@ import java.util.UUID;
 public class MinioService {
     
     private final AppProperties appProperties;
-    private final ToolFileRepository toolFileRepository;
+    private final IngestImageRepository ingestImageRepository;
     private MinioClient minioClient;
     
     private MinioClient getMinioClient() {
@@ -68,7 +67,8 @@ public class MinioService {
             
             // 保存到数据库
             String mimetype = getContentType(imageName);
-            toolFileRepository.insertToolFile(UUID.randomUUID(), imageName, fileKey, mimetype, imageBytes.length);
+            String minioUrl = appProperties.getMinio().getImgPathPrefix() + "/" + fileKey;
+            ingestImageRepository.insertImage(UUID.randomUUID(), imageName, fileKey, minioUrl, imageBytes.length, mimetype);
             
             log.debug("图片上传成功: {} -> {}", imageName, fileKey);
             return fileKey;

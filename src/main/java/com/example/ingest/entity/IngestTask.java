@@ -18,7 +18,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("ingest_tasks")
+@Table("mcp_ingest_tasks")
 public class IngestTask {
     
     @Id

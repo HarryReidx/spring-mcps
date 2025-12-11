@@ -15,7 +15,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("ingest_task_logs")
+@Table("mcp_ingest_task_logs")
 public class IngestTaskLog {
     
     @Id

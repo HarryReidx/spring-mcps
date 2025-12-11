@@ -4,12 +4,12 @@ import com.example.ingest.client.DifyClient;
 import com.example.ingest.client.MineruClient;
 import com.example.ingest.client.VlmClient;
 import com.example.ingest.config.AppProperties;
+import com.example.ingest.entity.IngestImage;
 import com.example.ingest.entity.IngestTask;
 import com.example.ingest.entity.IngestTaskLog;
-import com.example.ingest.entity.ToolFile;
 import com.example.ingest.model.*;
+import com.example.ingest.repository.IngestImageRepository;
 import com.example.ingest.repository.IngestTaskLogRepository;
-import com.example.ingest.repository.ToolFileRepository;
 import com.example.ingest.util.TextCleaningUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,7 +43,7 @@ public class DocumentIngestService {
     private final DifyClient difyClient;
     private final VlmClient vlmClient;
     private final SemanticTextProcessor semanticTextProcessor;
-    private final ToolFileRepository toolFileRepository;
+    private final IngestImageRepository ingestImageRepository;
     private final IngestTaskLogRepository taskLogRepository;
     private final AppProperties appProperties;
     private final MinioService minioService;
@@ -230,11 +230,6 @@ public class DocumentIngestService {
             return mdContent;
         }
         
-        if (toolFileRepository == null) {
-            log.warn("数据库未配置，跳过图片路径替换");
-            return mdContent;
-        }
-        
         log.info("开始替换图片路径，共 {} 张图片", images.size());
         
         String result = mdContent;
@@ -242,16 +237,16 @@ public class DocumentIngestService {
         try {
             List<String> imageNames = new ArrayList<>(images.keySet());
             
-            List<ToolFile> toolFiles = toolFileRepository.findByNameIn(imageNames);
+            List<IngestImage> ingestImages = ingestImageRepository.findByNameIn(imageNames);
             Map<String, String> nameToFileKey = new HashMap<>();
-            for (ToolFile toolFile : toolFiles) {
-                nameToFileKey.put(toolFile.getName(), toolFile.getFileKey());
+            for (IngestImage image : ingestImages) {
+                nameToFileKey.put(image.getName(), image.getFileKey());
             }
             
-            log.info("从数据库查询到 {} 条图片记录", toolFiles.size());
+            log.info("从数据库查询到 {} 条图片记录", ingestImages.size());
             
             // 如果数据库无记录，尝试上传图片到 MinIO
-            if (toolFiles.isEmpty() && !imageNames.isEmpty()) {
+            if (ingestImages.isEmpty() && !imageNames.isEmpty()) {
                 log.info("数据库无图片记录，开始上传到 MinIO");
                 logInfo(taskId, "开始上传图片", String.format("共 %d 张图片", imageNames.size()));
                 
@@ -307,17 +302,12 @@ public class DocumentIngestService {
     private Map<String, String> getImageRealUrls(Map<String, String> images) {
         Map<String, String> urls = new HashMap<>();
         
-        if (toolFileRepository == null) {
-            return urls;
-        }
-        
         try {
             List<String> imageNames = new ArrayList<>(images.keySet());
-            List<ToolFile> toolFiles = toolFileRepository.findByNameIn(imageNames);
+            List<IngestImage> ingestImages = ingestImageRepository.findByNameIn(imageNames);
             
-            for (ToolFile toolFile : toolFiles) {
-                String realUrl = appProperties.getMinio().getImgPathPrefix() + "/" + toolFile.getFileKey();
-                urls.put(toolFile.getName(), realUrl);
+            for (IngestImage image : ingestImages) {
+                urls.put(image.getName(), image.getMinioUrl());
             }
         } catch (Exception e) {
             log.error("查询图片真实 URL 失败", e);
