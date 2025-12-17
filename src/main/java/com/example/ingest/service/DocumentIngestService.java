@@ -363,7 +363,7 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(true)
+                                                .enabled(false)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
@@ -397,7 +397,7 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(true)
+                                                .enabled(false)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
@@ -429,7 +429,7 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(true)
+                                                .enabled(false)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
@@ -462,7 +462,7 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(true)
+                                                .enabled(false)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()

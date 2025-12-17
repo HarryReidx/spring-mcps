@@ -43,7 +43,15 @@ public class GlobalExceptionHandler {
         log.error("Dify 异常", e);
         Map<String, Object> response = new HashMap<>();
         response.put("success", false);
-        response.put("errorMsg", "Dify API 异常: " + e.getMessage());
+        
+        // 判断是否为知识库不存在错误
+        String errorMsg = e.getMessage();
+        if (errorMsg != null && (errorMsg.contains("404") || errorMsg.contains("not found") || errorMsg.contains("不存在"))) {
+            response.put("errorMsg", "知识库不存在，请检查 datasetId 是否正确");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        }
+        
+        response.put("errorMsg", "Dify API 异常: " + errorMsg);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
