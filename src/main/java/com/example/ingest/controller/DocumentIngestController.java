@@ -106,10 +106,29 @@ public class DocumentIngestController {
             log.info("获取 Dataset 详情成功: indexingTechnique={}, docForm={}", 
                     dataset.getIndexingTechnique(), dataset.getDocForm());
             
-            // CUSTOM 模式下校验规则兼容性
-            if ("CUSTOM".equalsIgnoreCase(request.getChunkingMode())) {
+            // GENERAL 模式下校验参数
+            if ("GENERAL".equalsIgnoreCase(request.getChunkingMode())) {
                 if (request.getSeparator() == null || request.getSeparator().isEmpty()) {
-                    throw new IllegalArgumentException("CUSTOM 模式下必须指定 separator");
+                    throw new IllegalArgumentException("GENERAL 模式下必须指定 separator");
+                }
+                if (request.getMaxTokens() != null && (request.getMaxTokens() < 50 || request.getMaxTokens() > 4000)) {
+                    throw new IllegalArgumentException("maxTokens 必须在 50-4000 之间");
+                }
+            }
+            
+            // PARENT_CHILD 模式下校验参数
+            if ("PARENT_CHILD".equalsIgnoreCase(request.getChunkingMode())) {
+                if (request.getParentSeparator() == null || request.getParentSeparator().isEmpty()) {
+                    throw new IllegalArgumentException("PARENT_CHILD 模式下必须指定 parentSeparator");
+                }
+                if (request.getSubSeparator() == null || request.getSubSeparator().isEmpty()) {
+                    throw new IllegalArgumentException("PARENT_CHILD 模式下必须指定 subSeparator");
+                }
+                if (request.getParentMaxTokens() != null && (request.getParentMaxTokens() < 50 || request.getParentMaxTokens() > 4000)) {
+                    throw new IllegalArgumentException("parentMaxTokens 必须在 50-4000 之间");
+                }
+                if (request.getSubMaxTokens() != null && (request.getSubMaxTokens() < 50 || request.getSubMaxTokens() > 4000)) {
+                    throw new IllegalArgumentException("subMaxTokens 必须在 50-4000 之间");
                 }
             }
             

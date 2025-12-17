@@ -62,14 +62,14 @@ public class SemanticTextProcessor {
             enrichedMarkdown = enrichImageDescriptionsWithVlm(enrichedMarkdown);
         }
         
-        // 2. LLM 摘要增强（在层级结构处理之前）
-        if (appProperties.getLlm().getEnabled()) {
+        // 2. LLM 摘要增强（仅在父子结构模式下生效）
+        if (appProperties.getLlm().getEnabled() && enableHeaderProcessing) {
             enrichedMarkdown = enrichParentWithSummary(enrichedMarkdown);
         }
         
-        // 3. 层级结构处理
+        // 3. 父子结构处理
         if (enableHeaderProcessing) {
-            enrichedMarkdown = processHierarchicalStructure(enrichedMarkdown);
+            enrichedMarkdown = processParentChildStructure(enrichedMarkdown);
         }
         
         log.info("语义增强完成，增强后文本长度: {}, VLM 失败图片数: {}", enrichedMarkdown.length(), vlmFailedImages.size());
@@ -103,11 +103,11 @@ public class SemanticTextProcessor {
      * @param markdown 原始 Markdown 文本
      * @return 格式转换后的 Markdown 文本
      */
-    private String preprocessForHierarchicalFormat(String markdown) {
+    private String preprocessForParentChildFormat(String markdown) {
         log.debug("开始格式转换（父子分段格式）");
         
-        String parentSeparator = appProperties.getProcessRule().getHierarchicalModel().getSeparator();
-        String subSeparator = appProperties.getProcessRule().getHierarchicalModel().getSubSeparator();
+        String parentSeparator = appProperties.getProcessRule().getParentChild().getParentSeparator();
+        String subSeparator = appProperties.getProcessRule().getParentChild().getSubSeparator();
         
         StringBuilder result = new StringBuilder();
         String[] lines = markdown.split("\n", -1);
@@ -522,11 +522,11 @@ public class SemanticTextProcessor {
      * @param markdown 原始 Markdown 文本
      * @return 处理后的 Markdown 文本
      */
-    private String processHierarchicalStructure(String markdown) {
-        log.debug("开始层级结构深度处理");
+    private String processParentChildStructure(String markdown) {
+        log.debug("开始父子结构深度处理");
         
         // 步骤1：格式转换（# -> {{>1#}}, 段落 -> {{>2#}}）
-        String formatted = preprocessForHierarchicalFormat(markdown);
+        String formatted = preprocessForParentChildFormat(markdown);
         
         // 步骤2：上下文注入（{{>2#}} 子标题 -> {{>2#}} （所属章节：xxx） 子标题）
         String contextInjected = injectParentContext(formatted);
@@ -534,7 +534,7 @@ public class SemanticTextProcessor {
         // 步骤3：递归预切分（防止超长子段被 Dify 截断）
         String chunked = applyRecursivePreChunking(contextInjected);
         
-        log.debug("层级结构深度处理完成");
+        log.debug("父子结构深度处理完成");
         return chunked;
     }
     
@@ -556,8 +556,8 @@ public class SemanticTextProcessor {
     private String injectParentContext(String markdown) {
         log.debug("开始上下文注入");
         
-        String parentSeparator = appProperties.getProcessRule().getHierarchicalModel().getSeparator();
-        String subSeparator = appProperties.getProcessRule().getHierarchicalModel().getSubSeparator();
+        String parentSeparator = appProperties.getProcessRule().getParentChild().getParentSeparator();
+        String subSeparator = appProperties.getProcessRule().getParentChild().getSubSeparator();
         
         StringBuilder result = new StringBuilder();
         String[] lines = markdown.split("\n", -1);
@@ -612,7 +612,7 @@ public class SemanticTextProcessor {
     private String applyRecursivePreChunking(String markdown) {
         log.debug("开始递归预切分处理");
         
-        String subSeparator = appProperties.getProcessRule().getHierarchicalModel().getSubSeparator();
+        String subSeparator = appProperties.getProcessRule().getParentChild().getSubSeparator();
         
         StringBuilder result = new StringBuilder();
         String[] lines = markdown.split("\n", -1);
@@ -697,8 +697,8 @@ public class SemanticTextProcessor {
             return "";
         }
         
-        String subSeparator = appProperties.getProcessRule().getHierarchicalModel().getSubSeparator();
-        int safeSplitThreshold = appProperties.getProcessRule().getHierarchicalModel().getSafeSplitThreshold();
+        String subSeparator = appProperties.getProcessRule().getParentChild().getSubSeparator();
+        int safeSplitThreshold = appProperties.getProcessRule().getParentChild().getSafeSplitThreshold();
         
         // 基准情况：长度在安全范围内
         if (content.length() <= safeSplitThreshold) {

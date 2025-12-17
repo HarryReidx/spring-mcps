@@ -24,20 +24,34 @@ public class IngestRequest {
     
     // ========== RAG 配置参数 ==========
     
-    /** 分块模式: AUTO（自动根据知识库类型匹配）, CUSTOM（自定义规则） */
+    /** 分块模式: AUTO, GENERAL, PARENT_CHILD */
     private String chunkingMode = "AUTO";
     
-    /** 最大 token 数（CUSTOM 模式下生效，父子结构为父分段 token 数） */
+    // GENERAL 模式参数
+    /** 分隔符（GENERAL 模式） */
+    private String separator;
+    
+    /** 最大 token 数（GENERAL 模式） */
     private Integer maxTokens;
     
-    /** 子分段最大 token 数（CUSTOM 模式 + 父子结构下生效） */
-    private Integer subMaxTokens;
-    
-    /** 分块重叠（CUSTOM 模式下生效） */
+    /** 分块重叠（GENERAL 模式） */
     private Integer chunkOverlap;
     
-    /** 分隔符（CUSTOM 模式下生效） */
-    private String separator;
+    // PARENT_CHILD 模式参数
+    /** 父段分隔符（PARENT_CHILD 模式） */
+    private String parentSeparator;
+    
+    /** 父段最大 token 数（PARENT_CHILD 模式） */
+    private Integer parentMaxTokens;
+    
+    /** 子段分隔符（PARENT_CHILD 模式） */
+    private String subSeparator;
+    
+    /** 子段最大 token 数（PARENT_CHILD 模式） */
+    private Integer subMaxTokens;
+    
+    /** 分块重叠（PARENT_CHILD 模式） */
+    private Integer parentChunkOverlap;
     
     /** 是否启用 VLM 图片理解 */
     private Boolean enableVlm = false;

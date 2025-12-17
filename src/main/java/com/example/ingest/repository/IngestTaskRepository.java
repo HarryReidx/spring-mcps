@@ -37,12 +37,12 @@ public interface IngestTaskRepository extends
     /**
      * 统计各状态任务数量
      */
-    @Query("SELECT COUNT(*) FROM ingest_tasks WHERE status = :status")
+    @Query("SELECT COUNT(*) FROM mcp_ingest_tasks WHERE status = :status")
     long countByStatus(String status);
     
     /**
      * 查询最近的任务
      */
-    @Query("SELECT * FROM ingest_tasks ORDER BY created_at DESC LIMIT :limit")
+    @Query("SELECT * FROM mcp_ingest_tasks ORDER BY created_at DESC LIMIT :limit")
     List<IngestTask> findRecentTasks(int limit);
 }

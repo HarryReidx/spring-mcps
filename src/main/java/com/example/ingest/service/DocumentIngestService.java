@@ -297,7 +297,7 @@ public class DocumentIngestService {
      * 语义增强处理
      */
     private String performSemanticEnrichment(String markdown, Map<String, String> imageUrls, Boolean enableVlm, DifyDatasetDetail dataset) {
-        boolean enableHeaderProcessing = "hierarchical_model".equalsIgnoreCase(dataset.getDocForm());
+        boolean enableHeaderProcessing = "parent_child".equalsIgnoreCase(dataset.getDocForm());
         return semanticTextProcessor.enrichMarkdown(markdown, imageUrls, Boolean.TRUE.equals(enableVlm), enableHeaderProcessing);
     }
 
@@ -350,9 +350,9 @@ public class DocumentIngestService {
         
         if (isAutoMode) {
             // AUTO 模式：根据 Dataset 类型自动匹配规则
-            if ("hierarchical_model".equalsIgnoreCase(docForm)) {
+            if ("parent_child".equalsIgnoreCase(docForm)) {
                 // 父子结构模型
-                AppProperties.HierarchicalModelConfig config = appProperties.getProcessRule().getHierarchicalModel();
+                AppProperties.ParentChildConfig config = appProperties.getProcessRule().getParentChild();
                 processRule = DifyCreateDocumentRequest.ProcessRule.builder()
                         .mode("hierarchical")
                         .rules(DifyCreateDocumentRequest.Rules.builder()
@@ -363,12 +363,12 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(false)
+                                                .enabled(true)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                        .separator(config.getSeparator())
-                                        .maxTokens(config.getMaxTokens())
+                                        .separator(config.getParentSeparator())
+                                        .maxTokens(config.getParentMaxTokens())
                                         .chunkOverlap(config.getChunkOverlap())
                                         .build())
                                 .parentMode(config.getParentMode())
@@ -397,7 +397,7 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(false)
+                                                .enabled(true)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
@@ -410,13 +410,14 @@ public class DocumentIngestService {
             }
         } else {
             // CUSTOM 模式：使用用户自定义规则
-            if ("hierarchical_model".equalsIgnoreCase(docForm)) {
+            if ("parent_child".equalsIgnoreCase(docForm)) {
                 // 父子结构模型
-                AppProperties.HierarchicalModelConfig defaultConfig = appProperties.getProcessRule().getHierarchicalModel();
-                Integer maxTokens = request.getMaxTokens() != null ? request.getMaxTokens() : defaultConfig.getMaxTokens();
+                AppProperties.ParentChildConfig defaultConfig = appProperties.getProcessRule().getParentChild();
+                Integer parentMaxTokens = request.getParentMaxTokens() != null ? request.getParentMaxTokens() : defaultConfig.getParentMaxTokens();
                 Integer subMaxTokens = request.getSubMaxTokens() != null ? request.getSubMaxTokens() : defaultConfig.getSubMaxTokens();
-                Integer chunkOverlap = request.getChunkOverlap() != null ? request.getChunkOverlap() : defaultConfig.getChunkOverlap();
-                String separator = request.getSeparator() != null ? request.getSeparator() : defaultConfig.getSeparator();
+                Integer chunkOverlap = request.getParentChunkOverlap() != null ? request.getParentChunkOverlap() : defaultConfig.getChunkOverlap();
+                String parentSeparator = request.getParentSeparator() != null ? request.getParentSeparator() : defaultConfig.getParentSeparator();
+                String subSeparator = request.getSubSeparator() != null ? request.getSubSeparator() : defaultConfig.getSubSeparator();
                 
                 processRule = DifyCreateDocumentRequest.ProcessRule.builder()
                         .mode("hierarchical")
@@ -428,17 +429,17 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(false)
+                                                .enabled(true)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                        .separator(separator)
-                                        .maxTokens(maxTokens)
+                                        .separator(parentSeparator)
+                                        .maxTokens(parentMaxTokens)
                                         .chunkOverlap(chunkOverlap)
                                         .build())
                                 .parentMode(defaultConfig.getParentMode())
                                 .subchunkSegmentation(DifyCreateDocumentRequest.Segmentation.builder()
-                                        .separator(defaultConfig.getSubSeparator())
+                                        .separator(subSeparator)
                                         .maxTokens(subMaxTokens)
                                         .chunkOverlap(chunkOverlap)
                                         .build())
@@ -461,7 +462,7 @@ public class DocumentIngestService {
                                                 .build(),
                                         DifyCreateDocumentRequest.PreProcessingRule.builder()
                                                 .id("remove_urls_emails")
-                                                .enabled(false)
+                                                .enabled(true)
                                                 .build()
                                 })
                                 .segmentation(DifyCreateDocumentRequest.Segmentation.builder()
@@ -474,13 +475,25 @@ public class DocumentIngestService {
             }
         }
         
-        return DifyCreateDocumentRequest.builder()
+        DifyCreateDocumentRequest difyRequest = DifyCreateDocumentRequest.builder()
                 .name(request.getFileName())
                 .text(markdown)
                 .indexingTechnique(indexingTechnique != null ? indexingTechnique : appProperties.getDefaultConfig().getIndexingTechnique())
                 .docForm(docForm)
                 .processRule(processRule)
                 .build();
+        
+        // 打印实际发送给 Dify 的分段参数
+        if (processRule != null && processRule.getRules() != null && processRule.getRules().getSegmentation() != null) {
+            DifyCreateDocumentRequest.Segmentation seg = processRule.getRules().getSegmentation();
+            log.info("Dify 分段参数: mode={}, separator={}, maxTokens={}, chunkOverlap={}", 
+                    processRule.getMode(), 
+                    seg.getSeparator().replace("\n", "\\n"), 
+                    seg.getMaxTokens(), 
+                    seg.getChunkOverlap());
+        }
+        
+        return difyRequest;
     }
 
     /**

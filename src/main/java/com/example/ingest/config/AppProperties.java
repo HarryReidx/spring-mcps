@@ -41,7 +41,7 @@ public class AppProperties {
     @Data
     public static class DefaultConfig {
         private String indexingTechnique = "high_quality";
-        private String docForm = "hierarchical_model";
+        private String docForm = "parent_child";
     }
 
     @Data
@@ -105,20 +105,20 @@ public class AppProperties {
         /** 文本模型配置 */
         private TextModelConfig textModel = new TextModelConfig();
 
-        /** 层级模型（父子结构）配置 */
-        private HierarchicalModelConfig hierarchicalModel = new HierarchicalModelConfig();
+        /** 父子结构配置 */
+        private ParentChildConfig parentChild = new ParentChildConfig();
 
         /** Q&A 模型配置 */
         private QaModelConfig qaModel = new QaModelConfig();
     }
 
     /**
-     * 文本模型分段配置
+     * 文本模型分段配置（GENERAL 模式）
      */
     @Data
     public static class TextModelConfig {
-        /** 分段分隔符 */
-        private String separator = "\n";
+        /** 分段分隔符（MinerU 解析后为 Markdown，推荐使用 "# " 一级标题分段） */
+        private String separator = "# ";
 
         /** 最大 token 数 */
         private Integer maxTokens = 1000;
@@ -128,15 +128,15 @@ public class AppProperties {
     }
 
     /**
-     * 层级模型（父子结构）分段配置
+     * 父子结构分段配置
      */
     @Data
-    public static class HierarchicalModelConfig {
+    public static class ParentChildConfig {
         /** 父分段分隔符 */
-        private String separator = "{{>1#}}";
+        private String parentSeparator = "{{>1#}}";
 
         /** 父分段最大 token 数 */
-        private Integer maxTokens = 1024;
+        private Integer parentMaxTokens = 1024;
 
         /** 子分段分隔符 */
         private String subSeparator = "{{>2#}}";
