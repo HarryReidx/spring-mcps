@@ -83,6 +83,12 @@ app:
     api-key: ${VLM_API_KEY:}                                               # VLM API 密钥（Ollama 不需要）
     model: ${VLM_MODEL:qwen2.5vl:7b}                                       # 模型名称
     max-tokens: 10000                                                      # 最大 token 数
+    # Ollama 专属参数（预防无限重复输出）
+    temperature: 0.7                                                       # 温度：控制随机性，0.0-2.0，越高越随机
+    repeat-penalty: 1.2                                                    # 重复惩罚：>1.0 惩罚重复，建议 1.1-1.5
+    repeat-last-n: 64                                                      # 检查最近 N 个 token 是否重复
+    top-p: 0.9                                                             # 核采样：0.0-1.0，控制输出多样性
+    num-predict: 512                                                       # 最大生成 token 数，防止无限输出
     prompt: "请简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: （简要描述） OCR: （关键文字）"
 
   # LLM 文本摘要配置（用于父文档检索增强）

@@ -36,6 +36,9 @@
           <el-descriptions-item label="结束时间">
             {{ formatTime(task.endTime) }}
           </el-descriptions-item>
+          <el-descriptions-item label="下载耗时">
+            {{ formatDuration(task.downloadCostTime) }}
+          </el-descriptions-item>
           <el-descriptions-item label="MinerU 耗时">
             {{ formatDuration(task.mineruCostTime) }}
           </el-descriptions-item>
@@ -53,15 +56,12 @@
         <template #header>
           <span>结果摘要</span>
         </template>
-        <el-descriptions :column="3" border>
+        <el-descriptions :column="2" border>
           <el-descriptions-item label="图片数量">
             {{ getSummaryValue('imageCount') }}
           </el-descriptions-item>
-          <el-descriptions-item label="分块数量">
-            {{ getSummaryValue('chunkCount') }}
-          </el-descriptions-item>
-          <el-descriptions-item label="VLM 耗时">
-            {{ getSummaryValue('vlmDuration') }}ms
+          <el-descriptions-item label="Dify 文档 ID">
+            {{ getSummaryValue('fileIds') }}
           </el-descriptions-item>
         </el-descriptions>
       </el-card>

@@ -31,6 +31,8 @@ public class IngestResponse {
     
     private Long mineruCostTime;
     
+    private Long downloadCostTime;
+    
     private Long totalCostTime;
     
     private Long fileSize;
@@ -43,7 +45,6 @@ public class IngestResponse {
     @AllArgsConstructor
     public static class Stats {
         private Integer imageCount;
-        private Integer chunkCount;
     }
     
     public Boolean isSuccess() {

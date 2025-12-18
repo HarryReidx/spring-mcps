@@ -106,6 +106,7 @@ public class IngestTaskService {
                 response.put("stats", ingestResponse.getStats());
                 response.put("vlmCostTime", ingestResponse.getVlmCostTime());
                 response.put("mineruCostTime", ingestResponse.getMineruCostTime());
+                response.put("downloadCostTime", ingestResponse.getDownloadCostTime());
                 response.put("totalCostTime", ingestResponse.getTotalCostTime());
             } else {
                 updateTaskFailure(task.getId(), ingestResponse.getErrorMsg());
@@ -183,6 +184,7 @@ public class IngestTaskService {
             task.setEndTime(LocalDateTime.now());
             task.setVlmCostTime(response.getVlmCostTime());
             task.setMineruCostTime(response.getMineruCostTime());
+            task.setDownloadCostTime(response.getDownloadCostTime());
             task.setTotalCostTime(response.getTotalCostTime());
             task.setFileSize(response.getFileSize());
             
@@ -199,9 +201,10 @@ public class IngestTaskService {
             Map<String, Object> summary = new HashMap<>();
             if (response.getStats() != null) {
                 summary.put("imageCount", response.getStats().getImageCount());
-                summary.put("chunkCount", response.getStats().getChunkCount());
             }
-            summary.put("fileIds", response.getFileIds());
+            if (response.getFileIds() != null && !response.getFileIds().isEmpty()) {
+                summary.put("fileIds", response.getFileIds().get(0));
+            }
             
             try {
                 task.setResultSummary(objectMapper.writeValueAsString(summary));

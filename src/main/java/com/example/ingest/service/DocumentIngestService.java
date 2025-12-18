@@ -76,9 +76,11 @@ public class DocumentIngestService {
                             dataset.getIndexingTechnique(), dataset.getDocForm()));
 
             // 2. 下载文件并记录大小
+            long downloadStartTime = System.currentTimeMillis();
             File downloadedFile = downloadFile(request.getFileUrl(), request.getFileName());
+            long downloadCostTime = System.currentTimeMillis() - downloadStartTime;
             long fileSize = downloadedFile.length();
-            logInfo(taskId, "文件下载完成", String.format("大小: %d bytes", fileSize));
+            logInfo(taskId, "文件下载完成", String.format("大小: %d bytes, 耗时: %d ms", fileSize, downloadCostTime));
             
             // 3. 格式转换
             File pdfFile = convertToPdfIfNeeded(downloadedFile, request.getFileType());
@@ -134,10 +136,10 @@ public class DocumentIngestService {
                     .fileIds(Collections.singletonList(difyResponse.getDocument().getId()))
                     .stats(IngestResponse.Stats.builder()
                             .imageCount(images != null ? images.size() : 0)
-                            .chunkCount(1)
                             .build())
                     .vlmCostTime(vlmCostTime)
                     .mineruCostTime(mineruCostTime)
+                    .downloadCostTime(downloadCostTime)
                     .totalCostTime(totalCostTime)
                     .fileSize(fileSize)
                     .vlmFailedImages(vlmFailedImages)

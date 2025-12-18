@@ -84,6 +84,9 @@ public class IngestTask {
     @Column("mineru_cost_time")
     private Long mineruCostTime;  // MinerU 解析耗时（毫秒）
     
+    @Column("download_cost_time")
+    private Long downloadCostTime;  // 文件下载耗时（毫秒）
+    
     /**
      * 任务状态枚举
      */

@@ -185,6 +185,21 @@ public class AppProperties {
 
         /** 提示词 */
         private String prompt = "请结合图片前后的文本上下文，简要描述这张图片的主要内容（100字以内），并提取图片中的关键文字。格式：描述: [简要描述]\nOCR: [关键文字]";
+        
+        /** Ollama 专属参数 - 温度：控制输出随机性，0.0 确定性最高，2.0 最随机 */
+        private Double temperature = 0.7;
+        
+        /** Ollama 专属参数 - 重复惩罚：>1.0 惩罚重复内容，建议 1.1-1.5，防止模型循环输出 */
+        private Double repeatPenalty = 1.2;
+        
+        /** Ollama 专属参数 - 重复检测窗口：检查最近 N 个 token 是否重复 */
+        private Integer repeatLastN = 64;
+        
+        /** Ollama 专属参数 - 核采样：0.0-1.0，控制输出多样性，越小越保守 */
+        private Double topP = 0.9;
+        
+        /** Ollama 专属参数 - 最大生成 token 数：限制输出长度，防止无限生成 */
+        private Integer numPredict = 512;
     }
 
     /**

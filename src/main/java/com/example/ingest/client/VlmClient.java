@@ -245,17 +245,16 @@ public class VlmClient {
      */
     private String buildVisionRequest(String imageData, String prompt, VlmProvider provider) throws IOException {
         if (provider == VlmProvider.OLLAMA) {
-            // 构建 Ollama 专属的 Options 参数
+            AppProperties.VlmConfig vlmConfig = appProperties.getVlm();
             Map<String, Object> options = Map.of(
-                    "temperature", 0.7,             // 适当增加随机性
-                    "repeat_penalty", 1.2,          // 重复惩罚：大于 1.0 惩罚重复，建议 1.1-1.5
-                    "repeat_last_n", 64,            // 检查最近的 64 个 token 是否重复
-                    "top_p", 0.9,                   // 核采样
-                    "num_predict", 512              // 限制最大生成长度，防止无限输出
+                    "temperature", vlmConfig.getTemperature(),
+                    "repeat_penalty", vlmConfig.getRepeatPenalty(),
+                    "repeat_last_n", vlmConfig.getRepeatLastN(),
+                    "top_p", vlmConfig.getTopP(),
+                    "num_predict", vlmConfig.getNumPredict()
             );
-            // Ollama 格式
             Map<String, Object> requestMap = Map.of(
-                    "model", appProperties.getVlm().getModel(),
+                    "model", vlmConfig.getModel(),
                     "messages", List.of(
                             Map.of(
                                     "role", "user",
@@ -264,7 +263,7 @@ public class VlmClient {
                             )
                     ),
                     "stream", false,
-                    "options", options  // 注入惩罚参数
+                    "options", options
             );
             return objectMapper.writeValueAsString(requestMap);
         } else {
