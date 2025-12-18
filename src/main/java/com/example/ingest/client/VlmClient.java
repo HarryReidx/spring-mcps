@@ -6,12 +6,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -29,6 +31,9 @@ public class VlmClient {
     private final AppProperties appProperties;
     private final ObjectMapper objectMapper;
     
+    @Qualifier("vlmExecutor")
+    private final Executor vlmExecutor;
+    
     private enum VlmProvider {
         OPENAI,
         QWEN,
@@ -39,13 +44,14 @@ public class VlmClient {
     private OkHttpClient getHttpClient() {
         return new OkHttpClient.Builder()
                 .connectTimeout(90, TimeUnit.SECONDS)
-                .readTimeout(180, TimeUnit.SECONDS)  // 增加到 3 分钟，解决超时问题
+                .readTimeout(600, TimeUnit.SECONDS)  // 10 分钟，防止 GPU 排队导致超时
                 .writeTimeout(90, TimeUnit.SECONDS)
                 .build();
     }
 
     /**
      * 异步分析图片（支持 GPT-4o / Claude-3.5 等视觉模型）
+     * 使用自定义线程池，避免阻塞 ForkJoinPool.commonPool()
      * 
      * @param imageUrl 图片 URL
      * @param imageName 图片名称（用于日志）
@@ -65,7 +71,7 @@ public class VlmClient {
                         .success(false)
                         .build();
             }
-        });
+        }, vlmExecutor);  // 使用自定义线程池
     }
 
     /**
@@ -239,6 +245,14 @@ public class VlmClient {
      */
     private String buildVisionRequest(String imageData, String prompt, VlmProvider provider) throws IOException {
         if (provider == VlmProvider.OLLAMA) {
+            // 构建 Ollama 专属的 Options 参数
+            Map<String, Object> options = Map.of(
+                    "temperature", 0.7,             // 适当增加随机性
+                    "repeat_penalty", 1.2,          // 重复惩罚：大于 1.0 惩罚重复，建议 1.1-1.5
+                    "repeat_last_n", 64,            // 检查最近的 64 个 token 是否重复
+                    "top_p", 0.9,                   // 核采样
+                    "num_predict", 512              // 限制最大生成长度，防止无限输出
+            );
             // Ollama 格式
             Map<String, Object> requestMap = Map.of(
                     "model", appProperties.getVlm().getModel(),
@@ -249,7 +263,8 @@ public class VlmClient {
                                     "images", List.of(imageData)
                             )
                     ),
-                    "stream", false
+                    "stream", false,
+                    "options", options  // 注入惩罚参数
             );
             return objectMapper.writeValueAsString(requestMap);
         } else {

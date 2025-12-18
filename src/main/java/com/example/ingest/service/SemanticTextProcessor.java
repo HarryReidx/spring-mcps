@@ -266,48 +266,111 @@ public class SemanticTextProcessor {
     }
 
     /**
-     * VLM 图片增强：提取上下文并调用 VLM 分析
+     * VLM 图片增强：并发提取上下文并调用 VLM 分析
      */
     private String enrichImageDescriptionsWithVlm(String markdown) {
         Matcher matcher = IMAGE_PATTERN.matcher(markdown);
-        StringBuilder result = new StringBuilder();
         
+        // 收集所有图片信息
+        List<ImageTask> imageTasks = new ArrayList<>();
         while (matcher.find()) {
             String imageUrl = matcher.group(2);
-            
-            // 提取图片周围上下文（前后各30字符）
             int start = matcher.start();
             int end = matcher.end();
+            // 提取图片周围上下文（前后各30字符）
             String beforeContext = markdown.substring(Math.max(0, start - 30), start).replace("\n", " ").trim();
             String afterContext = markdown.substring(end, Math.min(markdown.length(), end + 30)).replace("\n", " ").trim();
             String context = String.format("图片前部分文本：%s | 图片后部分文本：%s", beforeContext, afterContext);
             
-            // 调用 VLM 分析（设置超时）
+            imageTasks.add(new ImageTask(imageUrl, context, matcher.group(0), start, end));
+        }
+        
+        if (imageTasks.isEmpty()) {
+            return markdown;
+        }
+        
+        log.info("开始并发分析 {} 张图片", imageTasks.size());
+        long startTime = System.currentTimeMillis();
+        
+        // 并发提交所有图片分析任务
+        List<CompletableFuture<ImageTaskResult>> futures = imageTasks.stream()
+                .map(task -> vlmClient.analyzeImageAsync(task.imageUrl, task.imageUrl, task.context)
+                        .thenApply(analysis -> new ImageTaskResult(task, analysis))
+                        .exceptionally(e -> {
+                            log.error("VLM 分析异常: {}", task.imageUrl, e);
+                            return new ImageTaskResult(task, VlmClient.ImageAnalysisResult.builder()
+                                    .imageName(task.imageUrl)
+                                    .description("图片分析失败")
+                                    .ocrText("")
+                                    .success(false)
+                                    .build());
+                        }))
+                .toList();
+        
+        // 等待所有任务完成
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        
+        // 收集结果
+        Map<String, String> replacements = new HashMap<>();
+        for (CompletableFuture<ImageTaskResult> future : futures) {
             try {
-                VlmClient.ImageAnalysisResult analysis = vlmClient.analyzeImageAsync(imageUrl, imageUrl, context)
-                        .get(30, java.util.concurrent.TimeUnit.SECONDS);
-                if (analysis.isSuccess()) {
-                    String enrichedAlt = buildEnrichedAlt(analysis);
-                    String replacement = "![" + enrichedAlt + "](" + imageUrl + ")";
-                    matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
-                    log.debug("VLM 增强完成: {}", imageUrl);
+                ImageTaskResult result = future.get();
+                if (result.analysis.isSuccess()) {
+                    String enrichedAlt = buildEnrichedAlt(result.analysis);
+                    String replacement = "![" + enrichedAlt + "](" + result.task.imageUrl + ")";
+                    replacements.put(result.task.originalMatch, replacement);
+                    log.debug("VLM 增强完成: {}", result.task.imageUrl);
                 } else {
-                    vlmFailedImages.add(imageUrl);
-                    matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
+                    vlmFailedImages.add(result.task.imageUrl);
                 }
-            } catch (java.util.concurrent.TimeoutException e) {
-                log.warn("VLM 分析超时: {}", imageUrl);
-                vlmFailedImages.add(imageUrl);
-                matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
             } catch (Exception e) {
-                log.error("VLM 分析失败: {}", imageUrl, e);
-                vlmFailedImages.add(imageUrl);
-                matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
+                log.error("获取 VLM 结果失败", e);
             }
         }
         
-        matcher.appendTail(result);
-        return result.toString();
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("并发分析完成，成功 {} 张，失败 {} 张，总耗时 {}ms", 
+                replacements.size(), vlmFailedImages.size(), duration);
+        
+        // 批量替换
+        String result = markdown;
+        for (Map.Entry<String, String> entry : replacements.entrySet()) {
+            result = result.replace(entry.getKey(), entry.getValue());
+        }
+        
+        return result;
+    }
+    
+    /**
+     * 图片任务
+     */
+    private static class ImageTask {
+        String imageUrl;
+        String context;
+        String originalMatch;
+        int start;
+        int end;
+        
+        ImageTask(String imageUrl, String context, String originalMatch, int start, int end) {
+            this.imageUrl = imageUrl;
+            this.context = context;
+            this.originalMatch = originalMatch;
+            this.start = start;
+            this.end = end;
+        }
+    }
+    
+    /**
+     * 图片任务结果
+     */
+    private static class ImageTaskResult {
+        ImageTask task;
+        VlmClient.ImageAnalysisResult analysis;
+        
+        ImageTaskResult(ImageTask task, VlmClient.ImageAnalysisResult analysis) {
+            this.task = task;
+            this.analysis = analysis;
+        }
     }
 
 

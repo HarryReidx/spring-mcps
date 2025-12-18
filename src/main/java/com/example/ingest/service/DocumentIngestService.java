@@ -84,7 +84,10 @@ public class DocumentIngestService {
             File pdfFile = convertToPdfIfNeeded(downloadedFile, request.getFileType());
             
             // 4. 调用 MinerU 解析
+            long mineruStartTime = System.currentTimeMillis();
             MineruParseResponse parseResponse = mineruClient.parsePdf(pdfFile, request.getFileName());
+            long mineruCostTime = System.currentTimeMillis() - mineruStartTime;
+            logInfo(taskId, "MinerU 解析完成", String.format("耗时: %d ms", mineruCostTime));
             
             // 5. 处理解析结果
             MineruParseResponse.FileResult fileResult = parseResponse.getResults().values().iterator().next();
@@ -134,6 +137,7 @@ public class DocumentIngestService {
                             .chunkCount(1)
                             .build())
                     .vlmCostTime(vlmCostTime)
+                    .mineruCostTime(mineruCostTime)
                     .totalCostTime(totalCostTime)
                     .fileSize(fileSize)
                     .vlmFailedImages(vlmFailedImages)
@@ -272,7 +276,8 @@ public class DocumentIngestService {
                 log.info("图片上传完成: 成功 {}/{}", successCount, imageNames.size());
                 logInfo(taskId, "图片上传完成", String.format("成功 %d/%d", successCount, imageNames.size()));
             }
-            
+
+            // 替换图片真实路径到md
             for (String imageName : imageNames) {
                 String fileKey = nameToFileKey.get(imageName);
                 if (fileKey != null) {

@@ -29,6 +29,8 @@ public class IngestResponse {
     
     private Long vlmCostTime;
     
+    private Long mineruCostTime;
+    
     private Long totalCostTime;
     
     private Long fileSize;

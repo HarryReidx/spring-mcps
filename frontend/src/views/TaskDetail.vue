@@ -36,6 +36,9 @@
           <el-descriptions-item label="结束时间">
             {{ formatTime(task.endTime) }}
           </el-descriptions-item>
+          <el-descriptions-item label="MinerU 耗时">
+            {{ formatDuration(task.mineruCostTime) }}
+          </el-descriptions-item>
           <el-descriptions-item label="VLM 耗时">
             {{ formatDuration(task.vlmCostTime) }}
           </el-descriptions-item>

@@ -105,6 +105,7 @@ public class IngestTaskService {
                 response.put("fileIds", ingestResponse.getFileIds());
                 response.put("stats", ingestResponse.getStats());
                 response.put("vlmCostTime", ingestResponse.getVlmCostTime());
+                response.put("mineruCostTime", ingestResponse.getMineruCostTime());
                 response.put("totalCostTime", ingestResponse.getTotalCostTime());
             } else {
                 updateTaskFailure(task.getId(), ingestResponse.getErrorMsg());
@@ -181,6 +182,7 @@ public class IngestTaskService {
             task.setStatus(IngestTask.TaskStatus.COMPLETED);
             task.setEndTime(LocalDateTime.now());
             task.setVlmCostTime(response.getVlmCostTime());
+            task.setMineruCostTime(response.getMineruCostTime());
             task.setTotalCostTime(response.getTotalCostTime());
             task.setFileSize(response.getFileSize());
             

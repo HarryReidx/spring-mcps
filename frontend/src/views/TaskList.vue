@@ -90,6 +90,11 @@
             {{ formatDateTime(row.createdAt) }}
           </template>
         </el-table-column>
+        <el-table-column label="MinerU耗时" width="110">
+          <template #default="{ row }">
+            {{ formatTime(row.mineruCostTime) }}
+          </template>
+        </el-table-column>
         <el-table-column label="VLM耗时" width="100">
           <template #default="{ row }">
             {{ formatTime(row.vlmCostTime) }}

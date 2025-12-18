@@ -5,7 +5,7 @@ spring:
   
   # 数据库配置
   datasource:
-    url: jdbc:postgresql://117.50.121.191:5432/dify
+    url: jdbc:postgresql://117.50.75.212:5432/dify
     username: postgres
     password: TyAdmin@2026
     driver-class-name: org.postgresql.Driver
@@ -30,11 +30,11 @@ app:
   # Dify API 配置
   dify:
     api-key: ${DIFY_API_KEY:dataset-CxGlfh0xHkUoCts6dj17XUhw}  # Dify API 密钥
-    base-url: ${DIFY_BASE_URL:http://117.50.121.191/v1}            # Dify API 地址
+    base-url: ${DIFY_BASE_URL:http://117.50.75.212/v1}            # Dify API 地址
   
   # MinerU 服务配置
   mineru:
-    base-url: ${MINERU_BASE_URL:http://117.50.121.191:8000}        # MinerU 服务地址
+    base-url: ${MINERU_BASE_URL:http://117.50.75.212:8000}        # MinerU 服务地址
     server-type: ${MINERU_SERVER_TYPE:local}                   # 服务类型: local 或 remote
     token: ${MINERU_TOKEN:}                                    # 远程服务 token（可选）
     parse-method: auto                                         # 解析方法: auto, ocr, txt
@@ -45,14 +45,14 @@ app:
   
   # MinIO 配置
   minio:
-    endpoint: ${S3_ENDPOINT:http://117.50.121.191:9000}
+    endpoint: ${S3_ENDPOINT:http://117.50.75.212:9000}
     access-key: ${S3_ACCESS_KEY:minioadmin}
     secret-key: ${S3_SECRET_KEY:TyAdmin@2026}
     bucket-name: ${S3_BUCKET_NAME:ty-ai-flow}
     region: ${S3_REGION:us-east-1}
     # 文档中解析的图片上传到minio时的路径
     upload-path: ${MINIO_UPLOAD_PATH:knowledge-images/}
-    img-path-prefix: ${MINIO_IMG_PREFIX:http://117.50.121.191:9000/ty-ai-flow}
+    img-path-prefix: ${MINIO_IMG_PREFIX:http://117.50.75.212:9000/ty-ai-flow}
   
   # 文档分段规则配置（AUTO 模式下根据知识库类型自动匹配）
   process-rule:
@@ -79,7 +79,7 @@ app:
   # VLM 视觉模型配置
   vlm:
     provider: ${VLM_PROVIDER:ollama}                                       # 提供商: openai, qwen, modelverse, ollama
-    base-url: ${VLM_BASE_URL:http://117.50.121.191:11434/api/chat}            # VLM API 地址
+    base-url: ${VLM_BASE_URL:http://117.50.75.212:11434/api/chat}            # VLM API 地址
     api-key: ${VLM_API_KEY:}                                               # VLM API 密钥（Ollama 不需要）
     model: ${VLM_MODEL:qwen2.5vl:7b}                                       # 模型名称
     max-tokens: 10000                                                      # 最大 token 数
@@ -89,7 +89,7 @@ app:
   llm:
     enabled: ${LLM_ENABLED:true}                                          # 是否启用摘要增强
     provider: ${LLM_PROVIDER:ollama}                                       # 提供商: openai, ollama
-    base-url: ${LLM_BASE_URL:http://117.50.121.191:11434/api/chat}            # LLM API 地址
+    base-url: ${LLM_BASE_URL:http://117.50.75.212:11434/api/chat}            # LLM API 地址
     api-key: ${LLM_API_KEY:}                                               # LLM API 密钥（Ollama 不需要）
     model: ${LLM_MODEL:qwen3:1.7b}                                         # 模型名称
     max-tokens: 5000                                                        # 最大 token 数

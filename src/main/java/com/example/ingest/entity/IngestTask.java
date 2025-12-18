@@ -81,6 +81,9 @@ public class IngestTask {
     @Column("vlm_failed_images")
     private String vlmFailedImages;  // VLM 失败图片 URL（JSON 数组）
     
+    @Column("mineru_cost_time")
+    private Long mineruCostTime;  // MinerU 解析耗时（毫秒）
+    
     /**
      * 任务状态枚举
      */
