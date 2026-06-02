@@ -1,3 +1,5 @@
+[English Version](./README_EN.md)
+
 # Dify 文档入库服务
 
 一个功能完整的 Spring Boot 服务，用于绕过 Dify 平台参数大小限制，实现完整的文档解析与知识库入库流程。
