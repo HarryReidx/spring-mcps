@@ -41,12 +41,15 @@ public class VlmClient {
         OLLAMA
     }
     
+    // 线程安全的单例 OkHttpClient，复用连接池与线程池，规避频繁创建导致的 Socket 端口耗尽与线程泄漏隐患
+    private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .connectTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(600, TimeUnit.SECONDS)  // 10 分钟，防止 GPU 排队导致超时
+            .writeTimeout(90, TimeUnit.SECONDS)
+            .build();
+    
     private OkHttpClient getHttpClient() {
-        return new OkHttpClient.Builder()
-                .connectTimeout(90, TimeUnit.SECONDS)
-                .readTimeout(600, TimeUnit.SECONDS)  // 10 分钟，防止 GPU 排队导致超时
-                .writeTimeout(90, TimeUnit.SECONDS)
-                .build();
+        return this.httpClient;
     }
 
     /**
